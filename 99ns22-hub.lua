@@ -263,21 +263,29 @@ local function liveAnimIds(name)
 end
 
 -- objetos Animation espalhados no jogo cujo nome/pasta tem o nome do pet
-local animIndex
-local function indexedAnimIds(name)
-    if not animIndex then
-        animIndex = {}
-        for _, a in ipairs(RS:GetDescendants()) do
-            if a:IsA("Animation") and a.AnimationId ~= "" then
-                local chain, p = {}, a
-                for _ = 1, 4 do
-                    if not p or p == game then break end
-                    table.insert(chain, norm(p.Name)); p = p.Parent
-                end
-                table.insert(animIndex, {chain = chain, id = a.AnimationId, key = a.Name:lower()})
+local animIndex          -- fica pronto em segundo plano (ver warmup no fim do arquivo)
+local animIndexBuilding = false
+local function buildAnimIndexAsync()
+    if animIndex or animIndexBuilding then return end
+    animIndexBuilding = true
+    local idx = {}
+    local all = RS:GetDescendants()
+    for i, a in ipairs(all) do
+        if a:IsA("Animation") and a.AnimationId ~= "" then
+            local chain, p = {}, a
+            for _ = 1, 4 do
+                if not p or p == game then break end
+                table.insert(chain, norm(p.Name)); p = p.Parent
             end
+            table.insert(idx, {chain = chain, id = a.AnimationId, key = a.Name:lower()})
         end
+        if i % 3000 == 0 then task.wait() end     -- pausa: nao trava o jogo
     end
+    animIndex = idx
+    animIndexBuilding = false
+end
+local function indexedAnimIds(name)
+    if not animIndex then task.spawn(buildAnimIndexAsync) return {} end   -- ainda carregando: nao espera
     local out, want = {}, norm(name)
     for _, e in ipairs(animIndex) do
         for _, c in ipairs(e.chain) do
@@ -1552,6 +1560,7 @@ local function progressBar(adornee, seconds, text)
 end
 
 -- ===== efeitos de corrida =====
+local GHOST_PARTS
 local function rainbowSeq()
     local k = {}
     for i = 0, 6 do
@@ -1578,6 +1587,13 @@ local function shockwave(pos)
     end)
 end
 
+-- so as partes do corpo viram fantasma (acessorios/asas deixam pesado)
+GHOST_PARTS = {
+    Head = true, UpperTorso = true, LowerTorso = true, Torso = true,
+    LeftUpperArm = true, LeftLowerArm = true, LeftHand = true, RightUpperArm = true, RightLowerArm = true, RightHand = true,
+    LeftUpperLeg = true, LeftLowerLeg = true, LeftFoot = true, RightUpperLeg = true, RightLowerLeg = true, RightFoot = true,
+    ["Left Arm"] = true, ["Right Arm"] = true, ["Left Leg"] = true, ["Right Leg"] = true,
+}
 -- liga rastro arco-iris, faiscas, aura, fantasmas e zoom; devolve funcao pra desligar
 local function startRunFx(av, hrp, speedFn)
     local a0 = Instance.new("Attachment", hrp); a0.Position = Vector3.new(0, 1.6, 0)
@@ -1615,8 +1631,8 @@ local function startRunFx(av, hrp, speedFn)
             if spd > 2500 then
                 hue = (hue + 0.08) % 1
                 local col = Color3.fromHSV(hue, 0.8, 1)
-                for _, p in ipairs(av:GetDescendants()) do
-                    if p:IsA("BasePart") and p.Name ~= "HumanoidRootPart" and p.Transparency < 1 and p.Size.Magnitude < 8 then
+                for _, p in ipairs(av:GetChildren()) do
+                    if p:IsA("BasePart") and GHOST_PARTS[p.Name] and p.Transparency < 1 then
                         local g = Instance.new("Part")
                         g.Size = p.Size; g.CFrame = p.CFrame; g.Anchored = true
                         g.CanCollide = false; g.CanTouch = false; g.CanQuery = false
@@ -1629,7 +1645,7 @@ local function startRunFx(av, hrp, speedFn)
                     end
                 end
             end
-            task.wait(0.07)
+            task.wait(0.12)
         end
         Camera.FieldOfView = baseFov
     end)
@@ -1859,7 +1875,7 @@ end
 local function buildHub()
 local TS  = game:GetService("TweenService")
 local UIS = game:GetService("UserInputService")
-local VERSION = "v22"
+local VERSION = "v23"
 local pickResp
 
 if getgenv then
@@ -2861,6 +2877,19 @@ end)
 task.delay(0.6, function() setWin(true) end)
 simPopup("🎮 99NS22 HUB " .. VERSION .. " carregado")
 end
+
+-- aquecimento: faz as buscas pesadas aos poucos logo apos carregar (o clique em ROUBAR fica instantaneo)
+task.spawn(function()
+    task.wait(2)
+    pcall(function()
+        local f = RS.Assets.Models.Eggs
+        for i, m in ipairs(f:GetChildren()) do
+            gpos(m.Name)
+            if i % 25 == 0 then task.wait() end
+        end
+    end)
+    pcall(buildAnimIndexAsync)
+end)
 
 local okHub, errHub = pcall(buildHub)
 if not okHub then
