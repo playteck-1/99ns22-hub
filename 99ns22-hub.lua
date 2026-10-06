@@ -18,6 +18,7 @@ folder.Name = "ModVipVisuals"; folder.Parent = workspace
 folder:ClearAllChildren()
 
 local spawned = {}      -- {model, size, centerToPivot}
+local GK                -- o que aprendemos do jogo (preenchido mais abaixo)
 local mode = "Base"     -- "Base", "Fixo", "Seguir"
 local scale = 1
 local fixedAnchor, fixedFeetY
@@ -245,18 +246,21 @@ end
 -- pega a animacao que o PROPRIO JOGO esta tocando num pet real do mesmo tipo (nas bases)
 local function liveAnimIds(name)
     local out, want = {}, norm(name)
-    for _, fname in ipairs({"ClientRenderedAssets", "PlacedEggRenders"}) do
-        local f = workspace:FindFirstChild(fname)
-        if f then
-            for _, pm in ipairs(f:GetChildren()) do
-                for _, tag in ipairs(realPetTags(pm)) do
-                    if namesMatch(tag, want) then
-                        tracksOf(pm, out)
-                        if #out > 0 then return out end
-                        break
-                    end
-                end
+    local f = workspace:FindFirstChild("ClientRenderedAssets")
+    if not f then return out end
+    for _, pm in ipairs(f:GetChildren()) do
+        local hit = false
+        local data = pm:FindFirstChild("Data")
+        local dn = data and data:FindFirstChild("DisplayName")
+        if GK and GK.baseName and GK.baseName(pm, dn and (dn.Text:gsub("<[^>]->", "")) or nil) == name then hit = true end
+        if not hit then
+            for _, tag in ipairs(realPetTags(pm)) do
+                if tag == want then hit = true break end      -- nome EXATO (antes pegava pets parecidos)
             end
+        end
+        if hit then
+            tracksOf(pm, out)
+            if #out > 0 then return out end
         end
     end
     return out
@@ -297,37 +301,34 @@ end
 
 local animDebug = {}
 
-local function playAnim(m, name)
+local function playAnim(m, name, s)
     local ac = m:FindFirstChildWhichIsA("AnimationController", true) or m:FindFirstChildWhichIsA("Humanoid", true)
-    local dbg = {pet = name, controller = ac and ac.ClassName or "NENHUM"}
+    local dbg = {pet = name, controller = ac and ac.ClassName or "NENHUM", config = 0, index = 0}
     animDebug[#animDebug + 1] = dbg
     if not ac then return false end
     local animator = ac:FindFirstChildOfClass("Animator") or Instance.new("Animator", ac)
-    local ids = liveAnimIds(name)
-    dbg.live = #ids
-    local cfgIds = animIdsFromConfig(name)
-    dbg.config = #cfgIds
-    for _, e in ipairs(cfgIds) do table.insert(ids, e) end
-    local idx = indexedAnimIds(name)
-    dbg.index = #idx
-    for _, e in ipairs(idx) do table.insert(ids, e) end
-    -- tambem aceita Animation que venha dentro do proprio modelo
-    for _, a in ipairs(m:GetDescendants()) do
-        if a:IsA("Animation") and a.AnimationId ~= "" then table.insert(ids, {key = a.Name:lower(), id = a.AnimationId}) end
+    -- 1) memoria (o que pets reais desse tipo tocaram parado/andando)  2) pet real igual no servidor agora
+    local mem = GK and GK.info and GK.info[name] and GK.info[name].anims
+    local live = liveAnimIds(name)
+    dbg.live = #live
+    local idle = (mem and (mem.idle or mem.walk)) or (live[1] and live[1].id)
+    local walk = (mem and mem.walk) or idle
+    dbg.total = idle and 1 or 0
+    if not idle then dbg.err = "nenhum pet real desse tipo visto ainda (aprende sozinho quando aparecer um)" return false end
+    for _, t in ipairs(animator:GetPlayingAnimationTracks()) do t:Stop(0) end
+    local function load(id)
+        local a = Instance.new("Animation")
+        a.AnimationId = id
+        local ok, tr = pcall(function() return animator:LoadAnimation(a) end)
+        if ok and tr then tr.Looped = true return tr end
     end
-    dbg.total = #ids
-    for _, e in ipairs(ids) do
-        local ok, err = pcall(function()
-            local anim = Instance.new("Animation")
-            anim.AnimationId = e.id
-            local tr = animator:LoadAnimation(anim)
-            tr.Looped = true
-            tr:Play(0.2)
-        end)
-        if ok then dbg.played = e.key .. " " .. e.id return true end
-        dbg.err = tostring(err)
-    end
-    return false
+    local ti = load(idle)
+    if not ti then dbg.err = "LoadAnimation falhou" return false end
+    local tw = (walk ~= idle) and load(walk) or nil
+    ti:Play(0.2)
+    if s then s.trIdle, s.trWalk, s.wasMoving = ti, tw, false end
+    dbg.played = idle .. (tw and (" / andando " .. walk) or "")
+    return true
 end
 
 -- caixa so das partes VISIVEIS (ignora pecas tecnicas invisiveis longe do pet)
@@ -406,6 +407,21 @@ end
 local function penArea(p, frame)
     local x0, x1, z0, z1 = -22, 22, -12, 88
     local base = p:FindFirstChild("ToUpdate")
+    -- o proprio jogo marca o chao do cercado: ToUpdate.PetArea (onde os pets reais andam)
+    local pa = base and base:FindFirstChild("PetArea", true)
+    if pa and pa:IsA("BasePart") then
+        local mnX, mxX, mnZ, mxZ
+        for _, sx in ipairs({-1, 1}) do
+            for _, sz in ipairs({-1, 1}) do
+                local l = frame:PointToObjectSpace((pa.CFrame * CFrame.new(sx * pa.Size.X / 2, 0, sz * pa.Size.Z / 2)).Position)
+                mnX = math.min(mnX or l.X, l.X); mxX = math.max(mxX or l.X, l.X)
+                mnZ = math.min(mnZ or l.Z, l.Z); mxZ = math.max(mxZ or l.Z, l.Z)
+            end
+        end
+        if (mxX - mnX) > 10 and (mxZ - mnZ) > 10 then
+            return mnX + 2, mxX - 2, mnZ + 2, mxZ - 2, pa.Position.Y + pa.Size.Y / 2
+        end
+    end
     if base then
         local mnX, mxX, mnZ, mxZ
         for _, part in ipairs(base:GetDescendants()) do
@@ -423,17 +439,19 @@ local function penArea(p, frame)
     return x0, x1, z0, z1
 end
 
+local penBox      -- cercado medido (os pets passeiam por ele todo)
 -- coloca os pets em grade dentro do cercado (tamanho = o escolhido no menu)
 local function layoutBase()
     local p = myPlot(); if not p then return false end
     local frame = plotFrame(p); if not frame then return false end
-    local x0, x1, z0, z1 = penArea(p, frame)
+    local x0, x1, z0, z1, floorY = penArea(p, frame)
     local W, D, n = x1 - x0, z1 - z0, #spawned
     local biggest = 0
     for _, s in ipairs(spawned) do biggest = math.max(biggest, (s.origFoot or 8) * scale) end
     local f = math.max(8, biggest)   -- espaco de cada pet = maior pet (nunca encolhe sozinho)
     local cols = math.max(1, math.floor((W + GAP) / (f + GAP)))
-    local feetY = frame.Position.Y - 0.5
+    local feetY = floorY or (frame.Position.Y - 0.5)
+    penBox = {frame = frame, x0 = x0, x1 = x1, z0 = z0, z1 = z1}
     local rot = frame - frame.Position
     for i, s in ipairs(spawned) do
         rescale(s, scale)
@@ -489,7 +507,7 @@ local function spawnModel(src, label)
     prep(m)
     m.Name = "Visual_" .. label
     m.Parent = folder
-    local s = {model = m, phase = math.random() * 10, nextGoal = 0}
+    local s = {model = m, phase = math.random() * 10, nextGoal = 0, petName = label}
     pcall(function() s.k = m:GetScale() end)
     s.k = s.k or 1
     measure(s)
@@ -497,7 +515,7 @@ local function spawnModel(src, label)
     table.insert(spawned, s)
     layout()
     if s.home then s.model:PivotTo(s.home * s.centerToPivot) end
-    s.animated = playAnim(m, label)
+    s.animated = playAnim(m, label, s)
     return true, s
 end
 
@@ -527,19 +545,31 @@ hb = RunService.Heartbeat:Connect(function(dt)
             table.remove(spawned, i)
         elseif s.home and not s.flying then
             if roam and not s.still and now > s.nextGoal then
-                local rad = math.max(1.5, s.slotW * 0.35)
-                s.goal = s.home * CFrame.new((math.random() * 2 - 1) * rad, 0, (math.random() * 2 - 1) * rad)
-                s.nextGoal = now + 2 + math.random() * 4
+                if mode == "Base" and penBox then
+                    -- anda ate um ponto qualquer do cercado, para um pouco e escolhe outro (como os pets reais)
+                    local W, D = penBox.x1 - penBox.x0, penBox.z1 - penBox.z0
+                    local mx, mz = math.min(s.size.X / 2, W / 2), math.min(s.size.Z / 2, D / 2)
+                    local lx = penBox.x0 + mx + math.random() * math.max(0, W - 2 * mx)
+                    local lz = penBox.z0 + mz + math.random() * math.max(0, D - 2 * mz)
+                    local wp = penBox.frame:PointToWorldSpace(Vector3.new(lx, 0, lz))
+                    s.goal = CFrame.new(wp.X, s.home.Y, wp.Z) * (s.home - s.home.Position)
+                    local far = s.pos and (s.goal.Position - s.pos.Position).Magnitude or 0
+                    s.nextGoal = now + far / 6 + 2 + math.random() * 4
+                else
+                    local rad = math.max(1.5, s.slotW * 0.35)
+                    s.goal = s.home * CFrame.new((math.random() * 2 - 1) * rad, 0, (math.random() * 2 - 1) * rad)
+                    s.nextGoal = now + 2 + math.random() * 4
+                end
             end
             local goal = (roam and not s.still and s.goal) or s.home
             local cur = s.pos or goal
             local delta = goal.Position - cur.Position
             local dist = delta.Magnitude
             local newPos, look = goal.Position, nil
-            if dist > 25 and mode ~= "Seguir" then
+            if dist > 120 and mode ~= "Seguir" then
                 newPos = goal.Position   -- longe demais: aparece direto
             elseif dist > 0.05 then
-                local spd = (mode == "Seguir") and math.max(16, dist * 4) or 4   -- studs/s
+                local spd = (mode == "Seguir") and math.max(16, dist * 4) or 6   -- studs/s
                 newPos = cur.Position + delta.Unit * math.min(dist, spd * step)
                 look = Vector3.new(delta.X, 0, delta.Z)
             end
@@ -549,6 +579,14 @@ hb = RunService.Heartbeat:Connect(function(dt)
                 rot = curRot:Lerp(CFrame.lookAt(Vector3.zero, look.Unit), math.min(1, step * 6))
             end
             s.pos = CFrame.new(newPos) * rot
+            -- parado = animacao parada do pet real; andando = a de andar
+            if s.trWalk then
+                local mv = look ~= nil
+                if mv ~= s.wasMoving then
+                    s.wasMoving = mv
+                    if mv then s.trIdle:Stop(0.25); s.trWalk:Play(0.25) else s.trWalk:Stop(0.25); s.trIdle:Play(0.25) end
+                end
+            end
             local bob = s.animated and 0 or math.abs(math.sin((now + s.phase) * 3)) * 0.4
             s.model:PivotTo(CFrame.new(0, bob, 0) * s.pos * s.centerToPivot)
         end
@@ -873,7 +911,7 @@ local function fmtMoney(n)
     local suf = {"", "K", "M", "B", "T", "Qa", "Qi"}
     local i = 1
     while n >= 1000 and i < #suf do n = n / 1000; i = i + 1 end
-    return (i == 1 and tostring(math.floor(n)) or string.format("%.1f", n)) .. suf[i]
+    return (i == 1 and tostring(math.floor(n)) or (string.format("%.1f", n):gsub("%.0$", ""))) .. suf[i]
 end
 
 -- dados dos ovos do mapa: AssetCategory = pet que nasce
@@ -901,8 +939,189 @@ task.spawn(function()
     end)
 end)
 
+-- ===== o que o JOGO mostra nos pets reais (aprendido olhando as bases dos outros jogadores) =====
+-- Gravacao do jogo: cada pet real tem a placa "Data" (DisplayName, PerSecond "$4.6B/s", Odds = raridade).
+-- Copiamos essa placa (mesmo visual) e aprendemos renda/raridade de cada pet. Fica salvo em arquivo.
+GK = {info = {}, grad = {}, file = "modvip_pet_learn.json", hatchMode = "Rápido", gameFx = true, speedMode = "Flash", treadBonus = 300000, flashChar = true, runSpeed = 300}
+-- o servidor avisa quando VOCE sobe/desce da esteira
+pcall(function()
+    RS.Packages.Networking["RE/Treadmill/RenderStateShifted"].OnClientEvent:Connect(function(plr, on)
+        if plr == LP then GK.onTread = on == true end
+    end)
+end)
+pcall(function()
+    if isfile and isfile(GK.file) then
+        local d = HttpService:JSONDecode(readfile(GK.file))
+        if type(d) == "table" then GK.info = d end
+    end
+end)
+GK.MULT = {K = 1e3, M = 1e6, B = 1e9, T = 1e12, Qa = 1e15, Qi = 1e18, Sx = 1e21}
+GK.COLORS = {
+    Common = Color3.fromRGB(190, 190, 190), Uncommon = Color3.fromRGB(90, 220, 90), Rare = Color3.fromRGB(70, 150, 255),
+    Epic = Color3.fromRGB(180, 80, 255), Legendary = Color3.fromRGB(255, 170, 30), Mythic = Color3.fromRGB(255, 60, 90),
+    Secret = Color3.fromRGB(60, 60, 60), Cosmic = Color3.fromRGB(120, 90, 255), Eternal = Color3.fromRGB(255, 240, 200),
+    Divine = Color3.fromRGB(255, 220, 90),
+}
+function GK.parseMoney(t)
+    t = tostring(t or ""):gsub("<[^>]->", ""):gsub(",", "")
+    local n, suf = t:match("([%d%.]+)%s*(%a*)")
+    n = tonumber(n)
+    if not n then return end
+    return n * (GK.MULT[suf] or 1)
+end
+-- "Pure Jellyfish" -> "Jellyfish" (tira a mutacao da frente)
+function GK.baseName(m, display)
+    local am = RS:FindFirstChild("AssetModels")
+    if not am then return end
+    local p = m:GetAttribute("PreparedSourceName")
+    if type(p) == "string" and am:FindFirstChild(p) then return p end
+    if not display or display == "" then return end
+    if am:FindFirstChild(display) then return display end
+    local rest = display
+    while true do
+        local nxt = rest:match("^%S+%s+(.+)$")
+        if not nxt then return end
+        rest = nxt
+        if am:FindFirstChild(rest) then return rest end
+    end
+end
+function GK.scan()
+    local f = workspace:FindFirstChild("ClientRenderedAssets")
+    if not f then return end
+    local changed, gotTemplate = false, false
+    local learned = {}
+    local pos0 = {}
+    for _, m in ipairs(f:GetChildren()) do
+        local h = m:FindFirstChild("HumanoidRootPart")
+        if h then pos0[m] = h.Position end
+    end
+    task.wait(0.25)
+    for _, m in ipairs(f:GetChildren()) do
+        local data = m:FindFirstChild("Data")
+        if data and data:IsA("BillboardGui") then
+            if not GK.template then
+                local c = data:Clone()
+                if c then GK.template = c; gotTemplate = true end
+            end
+            local dn, ps, od = data:FindFirstChild("DisplayName"), data:FindFirstChild("PerSecond"), data:FindFirstChild("Odds")
+            local display = dn and (dn.Text:gsub("<[^>]->", "")) or ""
+            local name = GK.baseName(m, display)
+            if name then
+                local e = GK.info[name] or {}
+                local inc = ps and GK.parseMoney(ps.Text)
+                local pure = display == name
+                if inc and inc > 0 then
+                    if pure and (not e.pure or inc < e.income) then e.income, e.pure = inc, true; changed = true
+                    elseif not e.pure and (not e.income or inc < e.income) then e.income = inc; changed = true end
+                end
+                local rar = od and (od.Text:gsub("<[^>]->", "")) or ""
+                if rar ~= "" then
+                    if e.rarity ~= rar then e.rarity = rar; changed = true end
+                    local g = od:FindFirstChildOfClass("UIGradient")
+                    if g and not GK.grad[rar] then GK.grad[rar] = g:Clone() end
+                end
+                local ids = {}
+                for _, an in ipairs(m:GetDescendants()) do
+                    if an:IsA("Animator") then
+                        for _, tr in ipairs(an:GetPlayingAnimationTracks()) do
+                            if tr.Animation and tr.Animation.AnimationId ~= "" then table.insert(ids, tr.Animation.AnimationId) end
+                        end
+                    end
+                end
+                if ids[1] then
+                    local h = m:FindFirstChild("HumanoidRootPart")
+                    local moving = h and pos0[m] and (h.Position - pos0[m]).Magnitude > 0.2
+                    e.anims = e.anims or {}
+                    local slot = moving and "walk" or "idle"
+                    if e.anims[slot] ~= ids[1] then e.anims[slot] = ids[1]; changed = true; learned[name] = true end
+                end
+                GK.info[name] = e
+            end
+        end
+    end
+    -- seus pets que estavam sem animacao (ou com a errada) ganham a real assim que ela aparece
+    for _, sp in ipairs(spawned) do
+        if not sp.isEgg and sp.petName and learned[sp.petName] and sp.model.Parent then
+            sp.animated = playAnim(sp.model, sp.petName, sp)
+        end
+    end
+    if changed then pcall(function() if writefile then writefile(GK.file, HttpService:JSONEncode(GK.info)) end end) end
+    if gotTemplate then
+        -- pets que estavam com a plaquinha simples ganham a placa do jogo
+        for _, s in ipairs(spawned) do
+            if not s.isEgg and s.tagLabel and not s.tagIsData then
+                local a = s.model:FindFirstChild("SimTagAnchor")
+                if a then a:Destroy() end
+                s.tagLabel = nil
+            end
+        end
+    end
+end
+function GK.count()
+    local n = 0
+    for _ in pairs(GK.info) do n = n + 1 end
+    return n
+end
+-- placa igual a dos pets reais: nome, $/s e raridade (com o degrade da raridade)
+function GK.tag(s)
+    local tpl = GK.template
+    if not tpl then return end
+    local name = s.petName
+    local center = s.model:GetPivot() * s.centerToPivot:Inverse()
+    local w = math.clamp(math.max(s.size.X, s.size.Y) * 0.55, 6, 34)
+    local h = w * 0.47
+    local a = Instance.new("Part")
+    a.Name = "SimTagAnchor"; a.Size = Vector3.new(0.2, 0.2, 0.2); a.Transparency = 1
+    a.Anchored = true; a.CanCollide = false; a.CanTouch = false; a.CanQuery = false
+    a.CFrame = center * CFrame.new(0, s.size.Y / 2 + h * 0.35, 0)
+    a.Parent = s.model
+    local bb = tpl:Clone()
+    bb.Size = UDim2.new(w, 0, h, 0)
+    bb.StudsOffset = Vector3.zero
+    bb.Adornee = a; bb.Enabled = true; bb.Parent = a
+    local e = (name and GK.info[name]) or {}
+    local function set(n, txt)
+        local l = bb:FindFirstChild(n)
+        if l and l:IsA("TextLabel") then l.Text = txt; l.Visible = true return l end
+    end
+    set("DisplayName", name or "Pet")
+    set("Rarity", "")
+    local ps = set("PerSecond", "$" .. fmtMoney(s.income or 0) .. "/s")
+    local od = set("Odds", e.rarity or "")
+    if od then
+        local g = od:FindFirstChildOfClass("UIGradient")
+        if g then g:Destroy() end
+        local src = e.rarity and GK.grad[e.rarity]
+        if src then src:Clone().Parent = od
+        elseif e.rarity then od.TextColor3 = GK.COLORS[e.rarity] or Color3.new(1, 1, 1) end
+    end
+    if not ps then a:Destroy() return end
+    s.tagIsData = true
+    return ps
+end
+-- raridade de verdade: o servidor manda quando um ovo e entregue (FieldEggRedeemVerdict)
+pcall(function()
+    RS.Packages.Networking["RE/EggWorld/FieldEggRedeemVerdict"].OnClientEvent:Connect(function(d)
+        if GK.faking or type(d) ~= "table" or type(d.AssetCategory) ~= "string" or type(d.Rarity) ~= "string" then return end
+        local e = GK.info[d.AssetCategory] or {}
+        e.rarity = d.Rarity
+        if typeof(d.Color) == "Color3" then e.color = {d.Color.R, d.Color.G, d.Color.B} end
+        GK.info[d.AssetCategory] = e
+    end)
+end)
+task.spawn(function()
+    while alive() do
+        pcall(GK.scan)
+        task.wait(8)
+    end
+end)
+
 -- plaquinha em cima do modelo (parte invisivel dentro do modelo, anda junto)
 local function addTag(s)
+    if not s.isEgg then
+        local ok, tl = pcall(GK.tag, s)
+        if ok and tl then return tl end
+    end
     local center = s.model:GetPivot() * s.centerToPivot:Inverse()
     local a = Instance.new("Part")
     a.Name = "SimTagAnchor"; a.Size = Vector3.new(0.2, 0.2, 0.2); a.Transparency = 1
@@ -922,6 +1141,8 @@ end
 
 -- renda por segundo (estavel por nome de pet)
 local function incomeFor(name)
+    local e = name and GK.info[name]
+    if e and e.income then return e.income end
     local h = 0
     for i = 1, #name do h = (h * 31 + name:byte(i)) % 100000 end
     return 10 + (h % 90) * (1 + sim.hatched * 0.1)
@@ -1255,14 +1476,336 @@ local function pickEgg()
     return list[math.random(#list)]
 end
 
+-- ===== efeitos copiados da gravacao do jogo (ids reais de som/animacao) =====
+GK.SND_PLACE = "rbxassetid://74146265484496"     -- ovo plantado
+GK.SND_DETECT = "rbxassetid://96595477884583"    -- guardiao acordou
+GK.SND_SLEEP = "rbxassetid://129416806869914"    -- guardiao dormiu
+GK.ANIM_CARRY = "rbxassetid://102039335618606"   -- personagem carregando ovo
+GK.ANIM_CHASE = "rbxassetid://136832792656489"   -- guardiao correndo
+GK.ANIM_RETURN = "rbxassetid://113947385873952"  -- guardiao voltando pra casa
+GK.ANIM_SLEEP = "rbxassetid://119006758941979"   -- guardiao dormindo
+-- tempo pra chocar por raridade (Real = tempos do jogo; Rapido = pra ver logo)
+GK.HATCH = {
+    ["Rápido"] = {Common = 10, Uncommon = 12, Rare = 15, Epic = 20, Legendary = 25, Mythic = 30, Cosmic = 35, Secret = 40, Eternal = 45, Divine = 50},
+    Real = {Common = 20, Uncommon = 25, Rare = 40, Epic = 75, Legendary = 120, Mythic = 240, Cosmic = 480, Secret = 5400, Eternal = 14400, Divine = 43200},
+}
+function GK.hatchTime(cat)
+    local e = cat and GK.info[cat]
+    local t = GK.HATCH[GK.hatchMode] or GK.HATCH["Rápido"]
+    return (e and e.rarity and t[e.rarity]) or (GK.hatchMode == "Real" and 60 or HATCH_TIME)
+end
+function GK.fmtTime(t)
+    if t >= 3600 then return string.format("%dh %dm", math.floor(t / 3600), math.floor(t % 3600 / 60)) end
+    if t >= 60 then return string.format("%dm %ds", math.floor(t / 60), t % 60) end
+    return t .. "s"
+end
+function GK.sound(id, pos, vol)
+    local p = Instance.new("Part")
+    p.Anchored = true; p.CanCollide = false; p.CanTouch = false; p.CanQuery = false
+    p.Transparency = 1; p.Size = Vector3.new(0.2, 0.2, 0.2); p.Position = pos; p.Parent = folder
+    local s = Instance.new("Sound")
+    s.SoundId = id; s.Volume = vol or 0.8; s.Parent = p
+    s:Play()
+    game:GetService("Debris"):AddItem(p, 6)
+end
+function GK.anim(model, id, speed, prio)
+    local ac = model:FindFirstChildWhichIsA("Humanoid", true) or model:FindFirstChildWhichIsA("AnimationController", true)
+    if not ac then return end
+    local an = ac:FindFirstChildOfClass("Animator") or Instance.new("Animator", ac)
+    local a = Instance.new("Animation")
+    a.AnimationId = id
+    local ok, tr = pcall(function() return an:LoadAnimation(a) end)
+    if not ok or not tr then return end
+    tr.Looped = true
+    if prio then pcall(function() tr.Priority = prio end) end
+    tr:Play(0.15)
+    if speed then tr:AdjustSpeed(speed) end
+    return tr
+end
+function GK.stopAnims(model)
+    for _, an in ipairs(model:GetDescendants()) do
+        if an:IsA("Animator") then
+            for _, t in ipairs(an:GetPlayingAnimationTracks()) do t:Stop(0.2) end
+        end
+    end
+end
+-- terra voando + anel no chao (igual quando o jogo planta o ovo)
+function GK.plantFx(pos)
+    GK.sound(GK.SND_PLACE, pos)
+    local ring = Instance.new("Part")
+    ring.Shape = Enum.PartType.Cylinder; ring.Anchored = true
+    ring.CanCollide = false; ring.CanTouch = false; ring.CanQuery = false
+    ring.Color = Color3.fromRGB(120, 85, 50); ring.Material = Enum.Material.Ground
+    ring.Size = Vector3.new(0.12, 1, 1)
+    ring.CFrame = CFrame.new(pos + Vector3.new(0, 0.05, 0)) * CFrame.Angles(0, 0, math.rad(90))
+    ring.Parent = folder
+    local chunks = {}
+    for _ = 1, 9 do
+        local c = Instance.new("Part")
+        c.Anchored = true; c.CanCollide = false; c.CanTouch = false; c.CanQuery = false
+        c.Color = Color3.fromRGB(110 + math.random(0, 30), 75, 45); c.Material = Enum.Material.Ground
+        c.Size = Vector3.new(0.6, 0.42, 0.6) * (0.8 + math.random() * 0.6)
+        c.Parent = folder
+        local ang = math.random() * math.pi * 2
+        table.insert(chunks, {p = c, d = Vector3.new(math.cos(ang), 0, math.sin(ang)) * (1.5 + math.random() * 2), up = 2 + math.random() * 2})
+    end
+    task.spawn(function()
+        for i = 1, 25 do
+            local k = i / 25
+            ring.Size = Vector3.new(0.12, 1 + k * 7, 1 + k * 7)
+            ring.Transparency = k
+            for _, c in ipairs(chunks) do
+                c.p.CFrame = CFrame.new(pos + c.d * k + Vector3.new(0, math.sin(k * math.pi) * c.up, 0)) * CFrame.Angles(k * 4, k * 3, 0)
+                c.p.Transparency = math.max(0, k * 1.4 - 0.4)
+            end
+            task.wait(0.03)
+        end
+        ring:Destroy()
+        for _, c in ipairs(chunks) do c.p:Destroy() end
+    end)
+end
+-- ovo pronto: brilho pulsando + botao "Hatch!" (so na sua tela)
+function GK.ready(s)
+    local done = false
+    local hl = Instance.new("Highlight")
+    hl.FillColor = Color3.fromRGB(255, 245, 170); hl.OutlineColor = Color3.new(1, 1, 1)
+    hl.FillTransparency = 1; hl.OutlineTransparency = 0.3; hl.Adornee = s.model; hl.Parent = s.model
+    local center = s.model:GetPivot() * s.centerToPivot:Inverse()
+    local pp = Instance.new("Part")
+    pp.Name = "HatchPrompt"; pp.Size = Vector3.new(1, 1, 1); pp.Transparency = 1
+    pp.Anchored = true; pp.CanCollide = false; pp.CanTouch = false; pp.CanQuery = false
+    pp.CFrame = center; pp.Parent = s.model
+    local pr = Instance.new("ProximityPrompt")
+    pr.ActionText = "Hatch!"; pr.ObjectText = "Hatch!"; pr.HoldDuration = 0
+    pr.RequiresLineOfSight = false; pr.MaxActivationDistance = math.max(14, s.size.X + 6)
+    pr.Parent = pp
+    pr.Triggered:Connect(function() done = true end)
+    task.spawn(function()
+        while not done and hl.Parent do
+            for i = 0, 12 do
+                if done then break end
+                hl.FillTransparency = 1 - math.sin(i / 12 * math.pi) * 0.55
+                task.wait(0.05)
+            end
+            task.wait(1)
+        end
+    end)
+    return {
+        wait = function()
+            local t0 = tick()
+            while not done and s.model.Parent and alive() do
+                if simAuto and tick() - t0 > 2 then break end   -- auto: choca sozinho
+                if tick() - t0 > 120 then break end
+                task.wait(0.2)
+            end
+        end,
+        stop = function()
+            done = true
+            pcall(function() hl:Destroy() end)
+            pcall(function() pp:Destroy() end)
+        end,
+    }
+end
+-- ovo treme, brilha e estoura
+function GK.hatchFx(s)
+    local base = s.model:GetPivot()
+    for i = 1, 24 do
+        if not s.model.Parent then return end
+        local a = math.sin(i * 1.4) * math.rad(3 + i * 0.7)
+        s.model:PivotTo(base * CFrame.Angles(a * 0.4, 0, a))
+        task.wait(0.05)
+    end
+    local center = (base * s.centerToPivot:Inverse()).Position
+    GK.sound(GK.SND_PLACE, center, 1)
+    local ball = Instance.new("Part")
+    ball.Shape = Enum.PartType.Ball; ball.Material = Enum.Material.Neon; ball.Color = Color3.fromRGB(255, 250, 210)
+    ball.Anchored = true; ball.CanCollide = false; ball.CanTouch = false; ball.CanQuery = false
+    ball.Size = Vector3.new(1, 1, 1); ball.Position = center; ball.Parent = folder
+    local att = Instance.new("Attachment", ball)
+    local pe = Instance.new("ParticleEmitter")
+    pe.Texture = "rbxasset://textures/particles/sparkles_main.dds"; pe.LightEmission = 1
+    pe.Color = ColorSequence.new(Color3.fromRGB(255, 240, 150), Color3.fromRGB(255, 255, 255))
+    pe.Speed = NumberRange.new(10, 22); pe.SpreadAngle = Vector2.new(180, 180)
+    pe.Lifetime = NumberRange.new(0.5, 0.9); pe.Rate = 0
+    pe.Size = NumberSequence.new({NumberSequenceKeypoint.new(0, 1.2), NumberSequenceKeypoint.new(1, 0)})
+    pe.Parent = att
+    pe:Emit(60)
+    task.spawn(function()
+        local big = math.max(4, s.size.X * 1.6)
+        for i = 1, 15 do
+            ball.Size = Vector3.new(1, 1, 1) * (1 + (big - 1) * i / 15)
+            ball.Transparency = i / 15
+            task.wait(0.025)
+        end
+        task.wait(1)
+        ball:Destroy()
+    end)
+end
+-- guardiao da area acorda ("!" + som), corre atras de voce, volta pra casa e dorme (copia; o real some so pra voce)
+function GK.guardChase(area, target)
+    local real
+    pcall(function() real = workspace.World.Areas.GuardAreas[area].Guard end)
+    if not real then return end
+    local ok, c = pcall(function() return real:Clone() end)
+    if not ok or not c then return end
+    prep(c)
+    for _, d in ipairs(c:GetDescendants()) do
+        if d:IsA("ProximityPrompt") or d:IsA("BillboardGui") or d:IsA("Highlight") then d:Destroy() end
+    end
+    c.Name = "Visual_Guard"; c.Parent = folder
+    local home = real:GetPivot()
+    c:PivotTo(home)
+    hideModel(real)
+    local _, gsize = c:GetBoundingBox()
+    local hl = Instance.new("Highlight")
+    hl.FillColor = Color3.fromRGB(255, 40, 40); hl.FillTransparency = 0.75
+    hl.OutlineColor = Color3.fromRGB(255, 90, 90); hl.Adornee = c; hl.Parent = c
+    local bb = Instance.new("BillboardGui")
+    bb.Size = UDim2.fromOffset(60, 60); bb.StudsOffset = Vector3.new(0, gsize.Y / 2 + 2, 0)
+    bb.AlwaysOnTop = true; bb.Adornee = c.PrimaryPart or c:FindFirstChildWhichIsA("BasePart", true); bb.Parent = c
+    local tl = Instance.new("TextLabel", bb)
+    tl.Size = UDim2.fromScale(1, 1); tl.BackgroundTransparency = 1; tl.Text = "!"
+    tl.Font = Enum.Font.GothamBlack; tl.TextScaled = true; tl.TextColor3 = Color3.fromRGB(255, 50, 50)
+    tl.TextStrokeTransparency = 0
+    GK.sound(GK.SND_DETECT, home.Position, 1)
+    task.spawn(function()
+        pcall(function()
+            local cur = home
+            local function stepTo(goal, spd, maxT)
+                local t0 = tick()
+                while c.Parent and alive() and (not maxT or tick() - t0 < maxT) do
+                    local dt = RunService.Heartbeat:Wait()
+                    local gp = typeof(goal) == "Instance" and goal.Position or goal
+                    if typeof(goal) == "Instance" and not goal.Parent then break end
+                    local d = Vector3.new(gp.X - cur.X, 0, gp.Z - cur.Z)
+                    if d.Magnitude < 1 then break end
+                    local np = cur.Position + d.Unit * math.min(d.Magnitude, spd * dt)
+                    cur = CFrame.lookAt(np, np + d.Unit)
+                    c:PivotTo(cur)
+                end
+            end
+            task.wait(0.6)    -- "Waking"
+            GK.anim(c, GK.ANIM_CHASE, 5)
+            stepTo(target, 95, 3.5)    -- "Chasing" (~95 studs/s, como na gravacao)
+            pcall(function() hl:Destroy(); bb:Destroy() end)
+            GK.stopAnims(c)
+            GK.anim(c, GK.ANIM_RETURN, 1)
+            stepTo(home.Position, 45, 8)   -- "ReturningHome"
+            c:PivotTo(home)
+            GK.stopAnims(c)
+            GK.anim(c, GK.ANIM_SLEEP, 1)   -- "Sleeping"
+            GK.sound(GK.SND_SLEEP, home.Position)
+            task.wait(1.5)
+        end)
+        pcall(function() c:Destroy() end)
+        showModel(real)
+    end)
+end
+-- chama o efeito do PROPRIO jogo (so na sua tela): ex. o aviso de raridade ao entregar o ovo
+function GK.fireGame(evName, ...)
+    local ev = RS.Packages.Networking:FindFirstChild(evName)
+    if not ev then return false end
+    local args = table.pack(...)
+    local fired = false
+    GK.faking = true
+    if getconnections then
+        pcall(function()
+            for _, cn in ipairs(getconnections(ev.OnClientEvent)) do
+                if cn.Function then
+                    fired = true
+                    task.spawn(pcall, cn.Function, table.unpack(args, 1, args.n))
+                end
+            end
+        end)
+    end
+    if not fired and firesignal then fired = pcall(firesignal, ev.OnClientEvent, table.unpack(args, 1, args.n)) end
+    GK.faking = false
+    return fired
+end
+-- rastro de raio amarelo/laranja (estilo Flash) entre dois pontos
+function GK.bolt(a, b)
+    local d = (b - a).Magnitude
+    if d < 2 then return end
+    local n = math.clamp(math.floor(d / 25), 3, 8)
+    local segs, prev = {}, a
+    for i = 1, n do
+        local p = a:Lerp(b, i / n)
+        if i < n then p = p + Vector3.new((math.random() - 0.5) * 5, (math.random() - 0.5) * 4, (math.random() - 0.5) * 5) end
+        local len = (p - prev).Magnitude
+        if len > 0.05 then
+            local seg = Instance.new("Part")
+            seg.Anchored = true; seg.CanCollide = false; seg.CanTouch = false; seg.CanQuery = false
+            seg.Material = Enum.Material.Neon
+            seg.Color = math.random() < 0.7 and Color3.fromRGB(255, 220, 40) or Color3.fromRGB(255, 110, 20)
+            seg.Size = Vector3.new(0.4, 0.4, len)
+            seg.CFrame = CFrame.lookAt((prev + p) / 2, p)
+            seg.Parent = folder
+            table.insert(segs, seg)
+        end
+        prev = p
+    end
+    task.spawn(function()
+        for i = 1, 8 do
+            for _, g in ipairs(segs) do g.Transparency = i / 8 end
+            task.wait(0.04)
+        end
+        for _, g in ipairs(segs) do g:Destroy() end
+    end)
+end
+-- ovo reserva quando o pet nao tem modelo de ovo proprio (antes dava erro no roubo)
+function GK.fallbackEgg(area)
+    local f = workspace:FindFirstChild("AreaEggSlotsClient")
+    if f then
+        for _, m in ipairs(f:GetChildren()) do
+            local info = eggCat[m.Name]
+            if m:IsA("Model") and m:FindFirstChildWhichIsA("BasePart", true)
+                and (not area or (info and info.area == area) or m.Name:find(area, 1, true)) then
+                return m
+            end
+        end
+    end
+    local ok, list = pcall(function() return RS.Assets.Models.Eggs:GetChildren() end)
+    if ok and list and #list > 0 then return list[math.random(#list)] end
+    if not GK.eggTpl then
+        local m = Instance.new("Model")
+        local pt = Instance.new("Part")
+        pt.Size = Vector3.new(2, 2, 2); pt.Color = Color3.fromRGB(250, 240, 210); pt.Material = Enum.Material.SmoothPlastic
+        local sm = Instance.new("SpecialMesh", pt)
+        sm.MeshType = Enum.MeshType.Sphere; sm.Scale = Vector3.new(1, 1.3, 1)
+        pt.Parent = m; m.PrimaryPart = pt
+        GK.eggTpl = m
+    end
+    return GK.eggTpl
+end
+function GK.redeem(cat, pos)
+    if not GK.gameFx or not cat or not pos then return end
+    local e = GK.info[cat] or {}
+    local r = e.rarity or "Common"
+    local col = (e.color and Color3.new(e.color[1], e.color[2], e.color[3])) or GK.COLORS[r] or Color3.fromRGB(151, 151, 151)
+    GK.fireGame("RE/EggWorld/FieldEggRedeemVerdict", {Rarity = r, Position = pos, Color = col, AssetCategory = cat, DisplayName = cat .. " Egg"})
+end
+
 local simPopup  -- definido na GUI do simulador
 
+-- igual o jogo: planta (terra voando) -> contagem -> brilha pronto -> "Hatch!" -> treme e estoura
 local function chocar(s, cat)
-    for t = HATCH_TIME, 1, -1 do
+    pcall(function()
+        local c = s.model:GetPivot() * s.centerToPivot:Inverse()
+        GK.plantFx(Vector3.new(c.X, c.Y - s.size.Y / 2, c.Z))
+    end)
+    for t = GK.hatchTime(cat), 1, -1 do
         if not s.model.Parent or not alive() then return end
-        if s.tagLabel then s.tagLabel.Text = "🥚 " .. (cat or "Ovo") .. "\nChoca em " .. t .. "s" end
+        if s.tagLabel then s.tagLabel.Text = "🥚 " .. (cat or "Ovo") .. "\n" .. GK.fmtTime(t) end
         task.wait(1)
     end
+    if not s.model.Parent or not alive() then return end
+    if s.tagLabel then s.tagLabel.Text = "✨ " .. (cat or "Ovo") .. "\nPronto! Hatch!" end
+    local rd = GK.ready(s)
+    rd.wait()
+    rd.stop()
+    if not s.model.Parent or not alive() then return end
+    if s.tagLabel then s.tagLabel.Text = "🐣 Chocando..." end
+    GK.hatchFx(s)
     local idx = table.find(spawned, s)
     if idx then table.remove(spawned, idx) end
     s.model:Destroy()
@@ -1304,6 +1847,7 @@ local function simStealOne()
     local cat = chosenPet or (e.info and e.info.cat)
     if simPopup then simPopup("🥚 Roubou: " .. (cat or "Ovo")) end
     voar(s, e.m:GetPivot())
+    pcall(GK.redeem, cat, s.home and s.home.Position)
     addTag(s)
     task.spawn(chocar, s, cat)
 end
@@ -1315,9 +1859,9 @@ task.spawn(function()
         local total = 0
         for _, s in ipairs(spawned) do
             if not s.isEgg then
-                if not s.income then s.income = incomeFor(s.model.Name) end
+                if not s.income then s.income = incomeFor(s.petName or (s.model.Name:gsub("^Visual_", ""))) end
                 if not s.tagLabel and s.home and not s.flying then pcall(addTag, s) end
-                if s.tagLabel then s.tagLabel.Text = "💰 $" .. fmtMoney(s.income) .. "/s" end
+                if s.tagLabel then s.tagLabel.Text = s.tagIsData and ("$" .. fmtMoney(s.income) .. "/s") or ("💰 $" .. fmtMoney(s.income) .. "/s") end
                 total = total + s.income
             end
         end
@@ -1394,18 +1938,19 @@ pcall(function() watch(workspace) end)
 task.spawn(function()
     while task.wait(1) do
         if not alive() then break end
-        G.MV_TreadRate = visualTread and ((visualTreadRate) or treadGain(visualTreadName)) or nil
+        G.MV_TreadRate = GK.treadBonus or (visualTread and ((visualTreadRate) or treadGain(visualTreadName))) or nil
         local my, r = myPlot(), root()
         local tb = my and my:FindFirstChild("TreadmillBottom")
-        if tb and r then
+        local onIt = GK.onTread == true
+        if tb and r and not onIt then
             local l = tb.CFrame:PointToObjectSpace(r.Position)
-            local onIt = math.abs(l.X) < tb.Size.X / 2 + 2 and math.abs(l.Z) < tb.Size.Z / 2 + 2 and l.Y > -3 and l.Y < 10
-            G.MV_OnTread = onIt
-            if onIt then
-                local gain = (visualTread and visualTreadRate) or treadGain(visualTread and visualTreadName or nil)
-                sim.speed = sim.speed + gain
-                if simPopup and rewriteCount == 0 then simPopup("+" .. fmtMoney(gain) .. " ⚡ Velocidade", true) end
-            end
+            onIt = math.abs(l.X) < tb.Size.X / 2 + 2 and math.abs(l.Z) < tb.Size.Z / 2 + 2 and l.Y > -3 and l.Y < 10
+        end
+        G.MV_OnTread = onIt
+        if onIt then
+            local gain = G.MV_TreadRate or treadGain(nil)
+            sim.speed = sim.speed + gain
+            if simPopup and rewriteCount == 0 then simPopup("+" .. fmtMoney(gain) .. " ⚡ Velocidade", true) end
         end
     end
 end)
@@ -1449,7 +1994,8 @@ mouse.Button1Down:Connect(function()
 end)
 
 local function makeAvatar()
-    local ch = LP.Character; if not ch then return end
+    local ch = (GK.skinModel and GK.skinModel.Parent and GK.skinModel) or LP.Character
+    if not ch then return end
     local prevArch = ch.Archivable
     ch.Archivable = true
     local ok, av = pcall(function() return ch:Clone() end)
@@ -1498,7 +2044,14 @@ local function setRealHidden(h)
 end
 
 -- velocidade da copia usa a velocidade VISUAL ganha na esteira
-local function avSpeed() return math.clamp(1600 + (sim.speed or 0) * 2, 1600, 20000) end
+local function avSpeed()
+    local base = math.clamp(1600 + (sim.speed or 0) * 2, 1600, 20000)
+    local m = GK.speedMode
+    if m == "Flash" then return math.max(15000, base * 5) end
+    if m == "Super Flash" then return math.max(60000, base * 15) end
+    if m == "Instantâneo" then return 2e6 end
+    return base
+end
 
 local function flat(v) return Vector3.new(v.X, 0, v.Z) end
 
@@ -1515,6 +2068,7 @@ local function moveAv(av, hrp, target, speedFn, onStep)
         if dist < 1 then break end
         local dir = d.Unit
         local np = pos + dir * math.min(dist, speedFn() * dt)
+        if GK.speedMode ~= "Esteira" then GK.bolt(pos, np) end
         hrp.CFrame = CFrame.lookAt(np, np + dir)
         if onStep then onStep(hrp.CFrame) end
     end
@@ -1530,7 +2084,9 @@ local function rideTo(ms, hrp, groundY, target, speedFn)
         local dist = d.Magnitude
         if dist < 1 then break end
         local dir = d.Unit
+        local before = cur
         cur = cur + dir * math.min(dist, speedFn() * dt)
+        if GK.speedMode ~= "Esteira" then GK.bolt(Vector3.new(before.X, groundY + 2, before.Z), Vector3.new(cur.X, groundY + 2, cur.Z)) end
         local rot = CFrame.lookAt(Vector3.zero, dir)
         local center = Vector3.new(cur.X, groundY + ms.size.Y / 2, cur.Z)
         ms.model:PivotTo(CFrame.new(center) * rot * ms.centerToPivot)
@@ -1686,6 +2242,7 @@ end
 
 tripSteal = function()
     if tripBusy then return end
+    if GK.stopRun then GK.stopRun() end
     tripCancel = false
     local my = myPlot()
     if not my then if simPopup then simPopup("Clique 'Minha base e aqui' primeiro") end return end
@@ -1754,7 +2311,9 @@ tripSteal = function()
         -- 2) pega
         avPlay(hum, "idle")
         progressBar(hrp, 1.2, "Roubando...")
-        local carry = cloneVisual(eggModelFor(cat) or egg)
+        pcall(GK.guardChase, areaTxt, hrp)
+        local carry = cloneVisual(eggModelFor(cat) or egg or GK.fallbackEgg(petAreaName))
+            or cloneVisual(GK.fallbackEgg())
         if not carry then error("sem modelo de ovo pra " .. tostring(cat)) end
         for _, p in ipairs(carry:GetDescendants()) do
             if p:IsA("BasePart") and (p.Name == "Hitbox" or p.Name == "CustomBoundingBox") then p.Transparency = 1 end
@@ -1786,6 +2345,8 @@ tripSteal = function()
         -- 3) leva pra base
         if simPopup then simPopup("🥚 Roubou! Levando pra base") end
         avPlay(hum, "run")
+        -- animacao de carregar ovo do proprio jogo; se nao carregar, fica com os bracos esticados
+        if GK.anim(av, GK.ANIM_CARRY, 1, Enum.AnimationPriority.Movement) and stopArms then stopArms(); stopArms = nil end
         moveAv(av, hrp, deliver, avSpeed, carryStep)
 
         -- 4) entrega: o ovo vai pro cercado e choca
@@ -1796,6 +2357,7 @@ tripSteal = function()
         layout()
         sim.stolen = sim.stolen + 1
         voar(cs, carry:GetPivot())
+        pcall(GK.redeem, cat, deliver)
         addTag(cs)
         task.spawn(chocar, cs, cat)
 
@@ -1808,14 +2370,14 @@ tripSteal = function()
             moveAv(av, hrp, eggPos, avSpeed)
             local mon = src:Clone()
             prep(mon); mon.Name = "Visual_" .. src.Name; mon.Parent = folder
-            local ms = {model = mon, phase = math.random() * 10, nextGoal = 0}
+            local ms = {model = mon, phase = math.random() * 10, nextGoal = 0, petName = src.Name}
             rideMonster = ms
             pcall(function() ms.k = mon:GetScale() end)
             ms.k = ms.k or 1
             measure(ms); ms.origFoot = math.max(0.5, ms.size.X / ms.k)
             rescale(ms, scale)
             ms.ridePos = Vector3.new(eggPos.X, 0, eggPos.Z)
-            ms.animated = playAnim(mon, src.Name)
+            ms.animated = playAnim(mon, src.Name, ms)
             mon:PivotTo(CFrame.new(eggPos.X, groundNest + ms.size.Y / 2, eggPos.Z) * ms.centerToPivot)
             if simPopup then simPopup("🐉 Montou no " .. src.Name .. "!") end
             avPlay(hum, "sit")
@@ -1848,6 +2410,412 @@ tripSteal = function()
     if not ok and simPopup and not tostring(err):find("cancelado") then simPopup("Erro: " .. tostring(err)) end
 end
 
+-- ===== Flash no SEU personagem: so efeito (a velocidade de verdade quem manda e o servidor) =====
+do
+    local last, boltFrom, ghostT, baseFov = nil, nil, 0, nil
+    local hb2
+    hb2 = RunService.Heartbeat:Connect(function(dt)
+        if not alive() then hb2:Disconnect() return end
+        local ch = LP.Character
+        local hrp = ch and ch:FindFirstChild("HumanoidRootPart")
+        local hum = ch and ch:FindFirstChildOfClass("Humanoid")
+        if not GK.flashChar or tripBusy or not hrp or not hum then
+            last, boltFrom = nil, nil
+            if baseFov and not tripBusy then Camera.FieldOfView = baseFov; baseFov = nil end
+            return
+        end
+        local pos = hrp.Position
+        local spd = last and Vector3.new(pos.X - last.X, 0, pos.Z - last.Z).Magnitude / math.max(dt, 1e-3) or 0
+        last = pos
+        if hum.MoveDirection.Magnitude > 0.1 and spd > 4 then
+            -- raio amarelo atras de voce
+            local feet = pos - Vector3.new(0, 1.2, 0)
+            boltFrom = boltFrom or feet
+            if (feet - boltFrom).Magnitude > 6 then GK.bolt(boltFrom, feet); boltFrom = feet end
+            -- fantasmas amarelos
+            ghostT = ghostT + dt
+            if ghostT > 0.09 then
+                ghostT = 0
+                for _, part in ipairs(ch:GetChildren()) do
+                    if part:IsA("BasePart") and GHOST_PARTS[part.Name] and part.Transparency < 1 then
+                        local g = Instance.new("Part")
+                        g.Size = part.Size; g.CFrame = part.CFrame; g.Anchored = true
+                        g.CanCollide = false; g.CanTouch = false; g.CanQuery = false
+                        g.Material = Enum.Material.Neon; g.Color = Color3.fromRGB(255, 200, 40); g.Transparency = 0.5
+                        g.Parent = folder
+                        task.delay(0.03, function()
+                            for i = 1, 5 do g.Transparency = 0.5 + i * 0.1 task.wait(0.03) end
+                            g:Destroy()
+                        end)
+                    end
+                end
+            end
+            -- pernas bem mais rapidas
+            local an = hum:FindFirstChildOfClass("Animator")
+            if an then
+                for _, tr in ipairs(an:GetPlayingAnimationTracks()) do
+                    local n = tr.Name:lower()
+                    if n:find("run") or n:find("walk") then tr:AdjustSpeed(3) end
+                end
+            end
+            baseFov = baseFov or Camera.FieldOfView
+            Camera.FieldOfView = Camera.FieldOfView + (baseFov + 18 - Camera.FieldOfView) * math.min(1, dt * 6)
+        else
+            boltFrom = nil
+            if baseFov then
+                Camera.FieldOfView = Camera.FieldOfView + (baseFov - Camera.FieldOfView) * math.min(1, dt * 6)
+                if math.abs(Camera.FieldOfView - baseFov) < 0.3 then Camera.FieldOfView = baseFov; baseFov = nil end
+            end
+        end
+    end)
+end
+
+-- ===== CORRER FLASH (so na sua tela) =====
+-- Uma copia sua corre rapido, controlada pelo seu teclado/analogico; a camera segue ela.
+-- O personagem real fica parado e invisivel SO pra voce (pros outros voce esta parado).
+do
+    local run
+    function GK.ghosts(model, color)
+        for _, part in ipairs(model:GetChildren()) do
+            if part:IsA("BasePart") and GHOST_PARTS[part.Name] and part.Transparency < 1 then
+                local g = Instance.new("Part")
+                g.Size = part.Size; g.CFrame = part.CFrame; g.Anchored = true
+                g.CanCollide = false; g.CanTouch = false; g.CanQuery = false
+                g.Material = Enum.Material.Neon; g.Color = color; g.Transparency = 0.45
+                g.Parent = folder
+                task.delay(0.03, function()
+                    for i = 1, 5 do g.Transparency = 0.45 + i * 0.11 task.wait(0.03) end
+                    g:Destroy()
+                end)
+            end
+        end
+    end
+    function GK.isRunning() return run ~= nil end
+    function GK.stopRun()
+        if not run then return end
+        local r = run
+        run = nil
+        pcall(function() r.conn:Disconnect() end)
+        setRealHidden(false)
+        local ch = LP.Character
+        local rh = ch and ch:FindFirstChild("HumanoidRootPart")
+        if rh then rh.Anchored = false end
+        local hum = ch and ch:FindFirstChildOfClass("Humanoid")
+        if hum then Camera.CameraSubject = hum end
+        pcall(function() r.av:Destroy() end)
+        Camera.FieldOfView = r.fov
+    end
+    function GK.startRun()
+        if run or tripBusy then return end
+        local ch = LP.Character
+        local rh = ch and ch:FindFirstChild("HumanoidRootPart")
+        local rhum = ch and ch:FindFirstChildOfClass("Humanoid")
+        if not rh or not rhum then return end
+        local av, hum, hrp = makeAvatar()
+        if not av then return end
+        local rp = RaycastParams.new()
+        rp.FilterType = Enum.RaycastFilterType.Exclude
+        rp.FilterDescendantsInstances = {folder, ch}
+        local g = workspace:Raycast(rh.Position, Vector3.new(0, -50, 0), rp)
+        local hip = g and (rh.Position.Y - g.Position.Y) or 3
+        hrp.CFrame = rh.CFrame
+        rh.Anchored = true                      -- o real fica parado onde estava
+        local r = {av = av, fov = Camera.FieldOfView}
+        run = r
+        task.spawn(function()
+            while run == r do setRealHidden(true) task.wait(0.4) end
+        end)
+        Camera.CameraSubject = hum
+        avPlay(hum, "idle")
+        local moving, boltFrom, ghostT = false, nil, 0
+        r.conn = RunService.Heartbeat:Connect(function(dt)
+            if run ~= r then return end
+            if not alive() or not av.Parent or not rhum.Parent then GK.stopRun() return end
+            -- direcao que voce aperta (teclado ou analogico): o jogo calcula no MoveDirection
+            local dir = Vector3.new(rhum.MoveDirection.X, 0, rhum.MoveDirection.Z)
+            local mv = dir.Magnitude > 0.1
+            if mv ~= moving then
+                moving = mv
+                avPlay(hum, mv and "run" or "idle")
+            end
+            if mv then
+                dir = dir.Unit
+                local pp = hrp.Position + dir * GK.runSpeed * dt
+                rp.FilterDescendantsInstances = {folder, LP.Character}
+                local hit = workspace:Raycast(pp + Vector3.new(0, 30, 0), Vector3.new(0, -200, 0), rp)
+                local np = Vector3.new(pp.X, hit and (hit.Position.Y + hip) or hrp.Position.Y, pp.Z)
+                hrp.CFrame = CFrame.lookAt(np, np + dir)
+                local feet = np - Vector3.new(0, hip - 0.3, 0)
+                boltFrom = boltFrom or feet
+                if (feet - boltFrom).Magnitude > 6 then GK.bolt(boltFrom, feet); boltFrom = feet end
+                ghostT = ghostT + dt
+                if ghostT > 0.06 then ghostT = 0; GK.ghosts(av, Color3.fromRGB(255, 200, 40)) end
+                local an = hum:FindFirstChildOfClass("Animator")
+                if an then
+                    for _, tr in ipairs(an:GetPlayingAnimationTracks()) do tr:AdjustSpeed(math.clamp(GK.runSpeed / 60, 1.5, 4)) end
+                end
+                Camera.FieldOfView = Camera.FieldOfView + (r.fov + 22 - Camera.FieldOfView) * math.min(1, dt * 6)
+            else
+                boltFrom = nil
+                Camera.FieldOfView = Camera.FieldOfView + (r.fov - Camera.FieldOfView) * math.min(1, dt * 6)
+            end
+        end)
+    end
+end
+
+-- ===== SKINS (so na sua tela) =====
+-- Rastro: copia o rastro do jogo (ReplicatedStorage.Assets.Trails) e prende no seu personagem.
+-- Avatar: um "boneco" com a skin escolhida fica por cima de voce copiando cada movimento;
+-- o seu personagem de verdade fica invisivel SO pra voce. Pros outros nada muda.
+GK.TRAIL_ORDER = {"GreyTrail", "BlueTrail", "GreenTrail", "RedTrail", "PurpleTrail", "GoldenTrail",
+    "GalaxyTrail", "SecretTrail", "EternalTrail", "DivineTrail", "MoonbloomTrail"}
+GK.TRAIL_COLORS = {
+    GreyTrail = {Color3.fromRGB(170, 170, 170), Color3.fromRGB(90, 90, 90)},
+    BlueTrail = {Color3.fromRGB(60, 140, 255), Color3.fromRGB(20, 60, 200)},
+    GreenTrail = {Color3.fromRGB(80, 255, 120), Color3.fromRGB(20, 150, 60)},
+    RedTrail = {Color3.fromRGB(255, 70, 70), Color3.fromRGB(150, 10, 10)},
+    PurpleTrail = {Color3.fromRGB(190, 90, 255), Color3.fromRGB(90, 20, 170)},
+    GoldenTrail = {Color3.fromRGB(255, 220, 80), Color3.fromRGB(200, 130, 10)},
+    SecretTrail = {Color3.fromRGB(40, 40, 40), Color3.fromRGB(255, 255, 255)},
+    EternalTrail = {Color3.fromRGB(255, 250, 230), Color3.fromRGB(255, 200, 120)},
+    DivineTrail = {Color3.fromRGB(255, 240, 150), Color3.fromRGB(255, 255, 255)},
+}
+function GK.trailNames()
+    local out, seen = {}, {}
+    local ok, f = pcall(function() return RS.Assets.Trails end)
+    if not ok or not f then return out end
+    for _, n in ipairs(GK.TRAIL_ORDER) do
+        if f:FindFirstChild(n) then table.insert(out, n); seen[n] = true end
+    end
+    for _, c in ipairs(f:GetChildren()) do
+        if not seen[c.Name] then table.insert(out, c.Name) end
+    end
+    return out
+end
+function GK.wearTrail(name)
+    if GK.trailPart then pcall(function() GK.trailPart:Destroy() end) GK.trailPart = nil end
+    GK.trailName = name
+    local ch = LP.Character
+    local hrp = ch and ch:FindFirstChild("HumanoidRootPart")
+    if not name or not hrp then return false end
+    local src
+    pcall(function() src = RS.Assets.Trails[name] end)
+    if not src then return false end
+    local c = src:Clone()
+    local parts = {}
+    if c:IsA("BasePart") then table.insert(parts, c) end
+    for _, d in ipairs(c:GetDescendants()) do if d:IsA("BasePart") then table.insert(parts, d) end end
+    for _, p in ipairs(parts) do
+        p.Anchored = false; p.CanCollide = false; p.CanTouch = false; p.CanQuery = false; p.Massless = true
+    end
+    local main = parts[1]
+    if not main then c:Destroy() return false end
+    main.CFrame = hrp.CFrame
+    local w = main:FindFirstChildOfClass("WeldConstraint") or Instance.new("WeldConstraint", main)
+    w.Part0, w.Part1 = main, hrp
+    -- liga o efeito; se a peca vier sem o Trail dentro, monta um com as cores do nome
+    local hasFx = false
+    for _, d in ipairs(c:GetDescendants()) do
+        if d:IsA("Trail") or d:IsA("ParticleEmitter") or d:IsA("Beam") then d.Enabled = true; hasFx = true end
+    end
+    if not hasFx then
+        local a0 = main:FindFirstChild("MainTrailAttachment1") or Instance.new("Attachment", main)
+        local a1 = main:FindFirstChild("MainTrailAttachment2")
+        if not a1 then a1 = Instance.new("Attachment", main); a0.Position = Vector3.new(0, 1, 0); a1.Position = Vector3.new(0, -1, 0) end
+        local tr = Instance.new("Trail")
+        tr.Attachment0, tr.Attachment1 = a0, a1
+        local col = GK.TRAIL_COLORS[name]
+        if name == "GalaxyTrail" or not col then
+            local k = {}
+            for i = 0, 6 do table.insert(k, ColorSequenceKeypoint.new(i / 6, Color3.fromHSV(i / 6, 0.8, 1))) end
+            tr.Color = ColorSequence.new(k)
+        else
+            tr.Color = ColorSequence.new(col[1], col[2])
+        end
+        tr.Lifetime = 0.6; tr.LightEmission = 0.6
+        tr.Transparency = NumberSequence.new(0.1, 1)
+        tr.Parent = main
+    end
+    c.Parent = folder
+    GK.trailPart = c
+    -- o rastro de verdade some (so pra voce)
+    for _, d in ipairs(ch:GetDescendants()) do
+        if d:IsA("Trail") then d.Enabled = false end
+    end
+    return true
+end
+
+do
+    local skin
+    local function motorsOf(m)
+        local t = {}
+        for _, d in ipairs(m:GetDescendants()) do
+            if d:IsA("Motor6D") then t[d.Name .. "|" .. (d.Parent and d.Parent.Name or "")] = d end
+        end
+        return t
+    end
+    function GK.hasSkin() return skin ~= nil end
+    function GK.clearSkin()
+        if not skin then return end
+        local s0 = skin
+        skin = nil
+        GK.skinModel = nil
+        pcall(function() s0.conn:Disconnect() end)
+        pcall(function() s0.model:Destroy() end)
+        setRealHidden(false)
+    end
+    -- veste uma copia de um modelo de personagem (de outro jogador ou criado pela descricao)
+    function GK.wearModel(src)
+        local ch = LP.Character
+        if not ch or not ch:FindFirstChild("HumanoidRootPart") then return false, "sem personagem" end
+        if not src then return false, "modelo vazio" end
+        local old = src.Archivable
+        src.Archivable = true
+        local ok, m = pcall(function() return src:Clone() end)
+        src.Archivable = old
+        if not ok or not m then return false, "nao deu pra copiar" end
+        GK.clearSkin()
+        for _, d in ipairs(m:GetDescendants()) do
+            if d:IsA("Script") or d:IsA("LocalScript") or d:IsA("ModuleScript") or d:IsA("Tool")
+                or d:IsA("ForceField") or d:IsA("BillboardGui") or d:IsA("Sound") then
+                d:Destroy()
+            elseif d:IsA("BasePart") then
+                d.CanCollide = false; d.CanTouch = false; d.CanQuery = false; d.Massless = true; d.Anchored = false
+            end
+        end
+        local hum = m:FindFirstChildOfClass("Humanoid")
+        if hum then
+            hum.DisplayDistanceType = Enum.HumanoidDisplayDistanceType.None
+            hum.PlatformStand = true
+            pcall(function() hum:SetStateEnabled(Enum.HumanoidStateType.Dead, false) end)
+        end
+        local mroot = m:FindFirstChild("HumanoidRootPart")
+        if not mroot then m:Destroy() return false, "modelo sem HumanoidRootPart" end
+        mroot.Anchored = true
+        mroot.Transparency = 1
+        m.Name = "VisualSkin"
+        m.Parent = folder
+        local s0 = {model = m, theirs = motorsOf(m)}
+        skin = s0
+        GK.skinModel = m
+        local acc, hidden = 0, nil
+        s0.conn = RunService.Heartbeat:Connect(function(dt)
+            if skin ~= s0 then return end
+            local c = LP.Character
+            local r = c and c:FindFirstChild("HumanoidRootPart")
+            if not r or not m.Parent then return end
+            if c ~= s0.char then s0.char = c; s0.mine = motorsOf(c) end
+            -- copia posicao e a pose (cada junta) do seu personagem
+            mroot.CFrame = r.CFrame
+            for key, mm in pairs(s0.theirs) do
+                local rm = s0.mine[key]
+                if rm then mm.Transform = rm.Transform end
+            end
+            acc = acc + dt
+            if acc > 0.3 then
+                acc = 0
+                setRealHidden(true)
+                -- durante o roubo / Correr Flash a copia que corre ja usa a skin: esconde esta
+                local away = tripBusy or (GK.isRunning and GK.isRunning())
+                if away ~= hidden then
+                    hidden = away
+                    for _, d in ipairs(m:GetDescendants()) do
+                        if d:IsA("BasePart") or d:IsA("Decal") then d.LocalTransparencyModifier = away and 1 or 0 end
+                    end
+                end
+            end
+        end)
+        return true
+    end
+end
+function GK.wearDescription(desc)
+    local hum = LP.Character and LP.Character:FindFirstChildOfClass("Humanoid")
+    if not hum then return false, "sem personagem" end
+    local ok, m = pcall(function() return Players:CreateHumanoidModelFromDescription(desc, hum.RigType) end)
+    if not ok or not m then return false, "o Roblox nao deixou montar o avatar: " .. tostring(m) end
+    local r1, r2 = GK.wearModel(m)
+    pcall(function() m:Destroy() end)
+    return r1, r2
+end
+function GK.baseDesc()
+    if GK.curDesc then return GK.curDesc end
+    local ok, d = pcall(function() return Players:GetHumanoidDescriptionFromUserId(LP.UserId) end)
+    if ok and d then GK.curDesc = d return d end
+    local hum = LP.Character and LP.Character:FindFirstChildOfClass("Humanoid")
+    local ok2, d2 = pcall(function() return hum:GetAppliedDescription() end)
+    if ok2 and d2 then GK.curDesc = d2 return d2 end
+end
+-- itens raros famosos (ids do catalogo do Roblox)
+GK.PRESETS = {
+    {"💀 Headless + Korblox", function(d) d.Head = 134082579; d.RightLeg = 139607718 end},
+    {"👑 Dominus Empyreus", function(d) d.HatAccessory = "21070012" end},
+    {"⚔️ Valkyrie Helm", function(d) d.HatAccessory = "1365767" end},
+    {"🎩 Sparkle Time Fedora", function(d) d.HatAccessory = "1285307" end},
+    {"👑 Domino Crown", function(d) d.HatAccessory = "1031429" end},
+    {"🎧 Clockwork's Shades", function(d) d.FaceAccessory = "11748356" end},
+}
+function GK.wearPreset(i)
+    local d = GK.baseDesc()
+    if not d then return false, "nao consegui ler seu avatar" end
+    GK.PRESETS[i][2](d)
+    return GK.wearDescription(d)
+end
+-- tipo do item (catalogo) -> campo da descricao
+GK.ITEM_FIELD = {
+    [8] = "HatAccessory", [41] = "HairAccessory", [42] = "FaceAccessory", [43] = "NeckAccessory",
+    [44] = "ShouldersAccessory", [45] = "FrontAccessory", [46] = "BackAccessory", [47] = "WaistAccessory",
+    [17] = "Head", [18] = "Face", [11] = "Shirt", [12] = "Pants", [2] = "GraphicTShirt",
+    [27] = "Torso", [28] = "RightArm", [29] = "LeftArm", [30] = "LeftLeg", [31] = "RightLeg",
+}
+function GK.wearItem(text)
+    local id = tonumber((tostring(text or ""):match("%d+")))
+    if not id then return false, "digite o numero (ID) do item" end
+    local ok, info = pcall(function() return game:GetService("MarketplaceService"):GetProductInfo(id) end)
+    if not ok or type(info) ~= "table" then return false, "item nao encontrado" end
+    local field = GK.ITEM_FIELD[info.AssetTypeId]
+    if not field then return false, "esse tipo de item ainda nao da (tipo " .. tostring(info.AssetTypeId) .. ")" end
+    local d = GK.baseDesc()
+    if not d then return false, "nao consegui ler seu avatar" end
+    if field:find("Accessory") then
+        local cur = d[field]
+        d[field] = (cur ~= "" and (cur .. ",") or "") .. id
+    else
+        d[field] = id
+    end
+    local r1, r2 = GK.wearDescription(d)
+    return r1, r1 and info.Name or r2
+end
+-- copia o avatar de alguem: jogador do servidor (instantaneo) ou qualquer nome/ID do Roblox
+function GK.wearUser(text)
+    text = tostring(text or ""):match("^%s*(.-)%s*$")
+    if text == "" then return false, "digite um nome ou ID" end
+    local id = tonumber(text)
+    if not id then
+        for _, p in ipairs(Players:GetPlayers()) do
+            if (p.Name:lower() == text:lower() or p.DisplayName:lower() == text:lower()) and p.Character then
+                GK.curDesc = nil
+                return GK.wearModel(p.Character)
+            end
+        end
+        local ok, uid = pcall(function() return Players:GetUserIdFromNameAsync(text) end)
+        if not ok or not uid then return false, "usuario nao encontrado" end
+        id = uid
+    end
+    local ok, desc = pcall(function() return Players:GetHumanoidDescriptionFromUserId(id) end)
+    if not ok or not desc then return false, "nao achei o avatar desse usuario" end
+    GK.curDesc = desc
+    return GK.wearDescription(desc)
+end
+function GK.resetLook()
+    GK.curDesc = nil
+    GK.clearSkin()
+end
+-- renasceu: recoloca rastro (a skin segue sozinha)
+LP.CharacterAdded:Connect(function()
+    task.wait(1.5)
+    if alive() and GK.trailName then pcall(GK.wearTrail, GK.trailName) end
+end)
+
 -- ================= LISTAS =================
 local function petNames()
     local out = {}
@@ -1875,7 +2843,7 @@ end
 local function buildHub()
 local TS  = game:GetService("TweenService")
 local UIS = game:GetService("UserInputService")
-local VERSION = "v23"
+local VERSION = "v28"
 local pickResp
 
 if getgenv then
@@ -2054,7 +3022,7 @@ hHub.Position = UDim2.fromOffset(140, 8); hHub.Size = UDim2.fromOffset(70, 40); 
 local chip = Instance.new("Frame", header)
 chip.Position = UDim2.fromOffset(212, 18); chip.Size = UDim2.fromOffset(112, 22); chip.BackgroundColor3 = TH.card
 corner(chip, 11); stroke(chip, 1, true, 0.3)
-local chipT = label(chip, VERSION .. " • VISUAL", 11, FT, TH.text); chipT.Size = UDim2.fromScale(1, 1)
+local chipT = label(chip, VERSION, 11, FT, TH.text); chipT.Size = UDim2.fromScale(1, 1)
 
 local hStats = label(header, "", 13, FT, TH.text)
 hStats.AnchorPoint = Vector2.new(1, 0); hStats.Position = UDim2.new(1, -56, 0, 14)
@@ -2541,7 +3509,12 @@ row(pBase, {
     {"🏃 Esteira máxima / trocar", "gold", function() nextTreadmill() end},
     {"↩ Original", "card", function() removeTreadmill() end},
 })
-local treadNote = note(pBase, "Suba na esteira: os +4 do jogo viram o valor dela.")
+local treadNote = note(pBase, "Suba na esteira: o +24 do tênis vira o valor escolhido abaixo.")
+cycle(pBase, "👟 Ganho no tênis da esteira", function() return "+" .. fmtMoney(GK.treadBonus) end, function()
+    local opts = {300000, 1000000, 10000000, 100000000, 1000000000}
+    local i = table.find(opts, GK.treadBonus) or 0
+    GK.treadBonus = opts[i % #opts + 1]
+end)
 task.spawn(function()
     while task.wait(1) do
         if not alive() then break end
@@ -2608,6 +3581,32 @@ cycle(pSteal, "🌍 Área (sem pet escolhido)", function() return simArea end, f
     local i = table.find(SIM_AREAS, simArea) or 1
     simArea = SIM_AREAS[i % #SIM_AREAS + 1]
 end)
+section(pSteal, "Correr Flash (só na sua tela)")
+local refreshRun = toggle(pSteal, "🏃 Correr Flash (controle com WASD/analógico)", function() return GK.isRunning() end, function(v)
+    if v then GK.startRun() else GK.stopRun() end
+end)
+cycle(pSteal, "💨 Velocidade da corrida", function() return tostring(GK.runSpeed) end, function()
+    local opts = {150, 300, 600, 1200, 3000}
+    local i = table.find(opts, GK.runSpeed) or 0
+    GK.runSpeed = opts[i % #opts + 1]
+end)
+task.spawn(function()
+    local last = GK.isRunning()
+    while task.wait(0.3) do
+        if not alive() then GK.stopRun() break end
+        if GK.isRunning() ~= last then last = GK.isRunning(); refreshRun() end
+    end
+end)
+toggle(pSteal, "⚡ Efeito Flash no meu personagem", function() return GK.flashChar end, function(v) GK.flashChar = v end)
+cycle(pSteal, "⚡ Velocidade do roubo", function() return GK.speedMode end, function()
+    local modes = {"Esteira", "Flash", "Super Flash", "Instantâneo"}
+    local i = table.find(modes, GK.speedMode) or 1
+    GK.speedMode = modes[i % #modes + 1]
+end)
+cycle(pSteal, "⏱ Tempo pra chocar", function() return GK.hatchMode end, function()
+    GK.hatchMode = GK.hatchMode == "Rápido" and "Real" or "Rápido"
+end)
+toggle(pSteal, "✨ Aviso do jogo ao entregar ovo", function() return GK.gameFx end, function(v) GK.gameFx = v end)
 button(pSteal, "🥚 Roubar 1 (ovo voa sozinho)", "card", function() pcall(simStealOne) end)
 task.spawn(function()
     local last = simAuto
@@ -2621,7 +3620,7 @@ end)
 -- ABA: STATUS
 -- =====================================================================
 local pStats = newPage("Status", "💰", 4)
-section(pStats, "Seu progresso (visual)")
+section(pStats, "Seu progresso")
 local statsGrid = Instance.new("Frame", pStats)
 statsGrid.Size = UDim2.new(1, 0, 0, 2 * 66 + 10); statsGrid.BackgroundTransparency = 1; statsGrid.LayoutOrder = nextOrder(pStats)
 local sgl = Instance.new("UIGridLayout", statsGrid)
@@ -2634,7 +3633,6 @@ button(pStats, "🔄 Zerar progresso", "bad", function()
     sim.money, sim.speed, sim.stolen, sim.hatched = 0, 16, 0, 0
     simSave(); simPopup("🔄 Progresso zerado")
 end)
-note(pStats, "Tudo aqui é só visual: ninguém mais vê e o servidor não é alterado.")
 task.spawn(function()
     while task.wait(0.25) do
         if not alive() then hub:Destroy() break end
@@ -2650,12 +3648,99 @@ end)
 -- =====================================================================
 -- ABA: EXTRA
 -- =====================================================================
-local pExtra = newPage("Extra", "⚙️", 5)
+-- =====================================================================
+-- ABA: SKINS (so voce ve)
+-- =====================================================================
+do
+    local pSkin = newPage("Skins", "👕", 5)
+    local function done(ok, msg, okText)
+        simPopup(ok and ("✅ " .. (okText or "Pronto")) or ("❌ " .. tostring(msg)))
+    end
+    local function inputRow(pg, placeholder, btnText, cb)
+        local fr = Instance.new("Frame", pg)
+        fr.Size = UDim2.new(1, 0, 0, 44); fr.BackgroundTransparency = 1; fr.LayoutOrder = nextOrder(pg)
+        local tb = Instance.new("TextBox", fr)
+        tb.Size = UDim2.new(1, -140, 1, 0); tb.BackgroundColor3 = TH.card; tb.TextColor3 = TH.text
+        tb.PlaceholderText = placeholder; tb.PlaceholderColor3 = TH.sub; tb.Text = ""
+        tb.Font = FN; tb.TextSize = 14; tb.ClearTextOnFocus = false
+        corner(tb, 10)
+        local b = mkBtn(fr, btnText, "main", function() cb(tb.Text) end)
+        b.AnchorPoint = Vector2.new(1, 0); b.Position = UDim2.new(1, 0, 0, 0); b.Size = UDim2.new(0, 130, 1, 0)
+        return tb
+    end
+
+    section(pSkin, "✨ Rastros do jogo")
+    local trails = GK.trailNames()
+    if #trails == 0 then note(pSkin, "Não achei os rastros do jogo (Assets.Trails).") end
+    for i = 1, #trails, 3 do
+        local items = {}
+        for j = i, math.min(i + 2, #trails) do
+            local n = trails[j]
+            table.insert(items, {n:gsub("Trail$", ""), (j >= #trails - 3) and "main" or "card", function()
+                local ok = GK.wearTrail(n)
+                done(ok, "não deu pra colocar " .. n, "Rastro: " .. n)
+            end})
+        end
+        row(pSkin, items, 40)
+    end
+    button(pSkin, "❌ Tirar rastro", "card", function() GK.wearTrail(nil); simPopup("Rastro removido") end)
+
+    section(pSkin, "💎 Itens raros")
+    for i = 1, #GK.PRESETS, 2 do
+        local items = {}
+        for j = i, math.min(i + 1, #GK.PRESETS) do
+            table.insert(items, {GK.PRESETS[j][1], "card", function()
+                simPopup("⏳ Vestindo " .. GK.PRESETS[j][1] .. "...")
+                local ok, msg = GK.wearPreset(j)
+                done(ok, msg, GK.PRESETS[j][1])
+            end})
+        end
+        row(pSkin, items, 42)
+    end
+    note(pSkin, "Os itens se somam: dá pra usar Headless + Dominus + Valkyrie juntos.")
+    inputRow(pSkin, "ID de qualquer item do catálogo", "👕 Vestir", function(t)
+        simPopup("⏳ Procurando item...")
+        local ok, msg = GK.wearItem(t)
+        done(ok, msg, msg)
+    end)
+
+    section(pSkin, "👤 Copiar avatar")
+    inputRow(pSkin, "Nome ou ID de qualquer jogador", "📋 Copiar", function(t)
+        simPopup("⏳ Copiando avatar...")
+        local ok, msg = GK.wearUser(t)
+        done(ok, msg, "Avatar de " .. t)
+    end)
+    local plist = Instance.new("Frame", pSkin)
+    plist.Size = UDim2.new(1, 0, 0, 0); plist.AutomaticSize = Enum.AutomaticSize.Y
+    plist.BackgroundTransparency = 1; plist.LayoutOrder = nextOrder(pSkin)
+    local gl = Instance.new("UIGridLayout", plist)
+    gl.CellSize = UDim2.new(0.5, -5, 0, 38); gl.CellPadding = UDim2.fromOffset(10, 8)
+    local function fillPlayers()
+        for _, c in ipairs(plist:GetChildren()) do if c:IsA("GuiButton") then c:Destroy() end end
+        for _, pl in ipairs(Players:GetPlayers()) do
+            if pl ~= LP then
+                mkBtn(plist, "👤 " .. pl.DisplayName, "card", function()
+                    if not pl.Character then simPopup("❌ " .. pl.DisplayName .. " sem personagem agora") return end
+                    GK.curDesc = nil
+                    local ok, msg = GK.wearModel(pl.Character)
+                    done(ok, msg, "Avatar de " .. pl.DisplayName)
+                end)
+            end
+        end
+    end
+    button(pSkin, "🔄 Jogadores do servidor (toque pra copiar)", "card", fillPlayers)
+    fillPlayers()
+    button(pSkin, "↩️ Voltar ao meu avatar", "bad", function() GK.resetLook(); simPopup("Avatar normal de volta") end)
+    note(pSkin, "Tudo aqui aparece só pra você. Pros outros jogadores nada muda.")
+end
+
+local pExtra = newPage("Extra", "⚙️", 6)
 section(pExtra, "Diagnóstico")
 local function copyDiagnostic()
     local o = {}
     local function L(t) table.insert(o, t) end
     L("versao: " .. VERSION .. " | sessao ok: " .. tostring(alive()))
+    L("pets aprendidos das bases: " .. GK.count() .. " | placa do jogo: " .. tostring(GK.template ~= nil) .. " | chocar: " .. GK.hatchMode)
     L("modo: " .. mode .. " | mySlot: " .. tostring(mySlot) .. " | plot achado: " .. tostring(myPlot() and myPlot().Name))
     local a = baseAnchor()
     L("ancora base: " .. (a and tostring(a.Position) or "nil"))
@@ -2888,7 +3973,6 @@ task.spawn(function()
             if i % 25 == 0 then task.wait() end
         end
     end)
-    pcall(buildAnimIndexAsync)
 end)
 
 local okHub, errHub = pcall(buildHub)
