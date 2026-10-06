@@ -311,6 +311,11 @@ local function playAnim(m, name, s)
     local mem = GK and GK.info and GK.info[name] and GK.info[name].anims
     local live = liveAnimIds(name)
     dbg.live = #live
+    local info = GK and GK.info and GK.info[name]
+    if info and info.rig and GK.rigSig(m) ~= info.rig then
+        dbg.err = "modelo diferente do que o jogo usa (anima quando alguem com esse pet entrar)"
+        return false
+    end
     local idle = (mem and (mem.idle or mem.walk)) or (live[1] and live[1].id)
     local walk = (mem and mem.walk) or idle
     dbg.total = idle and 1 or 0
@@ -501,13 +506,15 @@ end
 local wander = true   -- passear pelo cercado
 
 local function spawnModel(src, label)
+    local cached = GK and GK.renderCache and GK.renderCache[label]
+    if cached then src = cached end
     local ok, m = pcall(function() return src:Clone() end)
     if not ok or not m then return false end
     if not m:IsA("Model") then local w = Instance.new("Model"); m.Parent = w; m = w end
     prep(m)
     m.Name = "Visual_" .. label
     m.Parent = folder
-    local s = {model = m, phase = math.random() * 10, nextGoal = 0, petName = label}
+    local s = {model = m, phase = math.random() * 10, nextGoal = 0, petName = label, fromRender = cached ~= nil}
     pcall(function() s.k = m:GetScale() end)
     s.k = s.k or 1
     measure(s)
@@ -942,7 +949,38 @@ end)
 -- ===== o que o JOGO mostra nos pets reais (aprendido olhando as bases dos outros jogadores) =====
 -- Gravacao do jogo: cada pet real tem a placa "Data" (DisplayName, PerSecond "$4.6B/s", Odds = raridade).
 -- Copiamos essa placa (mesmo visual) e aprendemos renda/raridade de cada pet. Fica salvo em arquivo.
-GK = {info = {}, grad = {}, file = "modvip_pet_learn.json", hatchMode = "Rápido", gameFx = true, speedMode = "Flash", treadBonus = 300000, flashChar = true, runSpeed = 300}
+GK = {info = {}, grad = {}, file = "modvip_pet_learn.json", hatchMode = "Rápido", gameFx = true, speedMode = "Flash", treadBonus = 300000, flashChar = true, runSpeed = 300, renderCache = {}, renderPure = {}}
+-- "assinatura" do esqueleto: se o modelo nao tem os mesmos ossos/juntas, a animacao do jogo fica toda errada nele
+function GK.rigSig(m)
+    local names = {}
+    for _, d in ipairs(m:GetDescendants()) do
+        if d:IsA("Bone") or d:IsA("Motor6D") then table.insert(names, d.Name) end
+    end
+    table.sort(names)
+    local str = table.concat(names, ",")
+    local h = 0
+    for i = 1, #str do h = (h * 31 + str:byte(i)) % 2147483647 end
+    return #names .. ":" .. h
+end
+-- troca o modelo de um pet ja na base pelo modelo que o jogo usa de verdade
+function GK.swapModel(sp, src)
+    local ok, m = pcall(function() return src:Clone() end)
+    if not ok or not m then return false end
+    prep(m)
+    m.Name = sp.model.Name
+    local center = sp.model:GetPivot() * sp.centerToPivot:Inverse()
+    sp.model:Destroy()
+    m.Parent = folder
+    sp.model, sp.tagLabel, sp.tagIsData, sp.trIdle, sp.trWalk = m, nil, nil, nil, nil
+    pcall(function() sp.k = m:GetScale() end)
+    sp.k = sp.k or 1
+    measure(sp)
+    sp.origFoot = math.max(0.5, sp.size.X / sp.k)
+    rescale(sp, scale)
+    m:PivotTo(center * sp.centerToPivot)
+    sp.fromRender = true
+    return true
+end
 -- o servidor avisa quando VOCE sobe/desce da esteira
 pcall(function()
     RS.Packages.Networking["RE/Treadmill/RenderStateShifted"].OnClientEvent:Connect(function(plr, on)
@@ -1025,6 +1063,28 @@ function GK.scan()
                     if an:IsA("Animator") then
                         for _, tr in ipairs(an:GetPlayingAnimationTracks()) do
                             if tr.Animation and tr.Animation.AnimationId ~= "" then table.insert(ids, tr.Animation.AnimationId) end
+                        end
+                    end
+                end
+                local inner = m:FindFirstChild("Model")
+                if inner and inner:IsA("Model") then
+                    local sig = GK.rigSig(inner)
+                    if e.rig ~= sig then e.rig = sig; changed = true end
+                    if not GK.renderCache[name] or (pure and not GK.renderPure[name]) then
+                        local old = inner.Archivable
+                        inner.Archivable = true
+                        local okc, c = pcall(function() return inner:Clone() end)
+                        inner.Archivable = old
+                        if okc and c then
+                            pcall(function() c:ScaleTo(1) end)
+                            GK.renderCache[name], GK.renderPure[name] = c, pure
+                            local swapped = false
+                            for _, sp in ipairs(spawned) do
+                                if sp.petName == name and not sp.isEgg and not sp.fromRender and sp.model.Parent then
+                                    if GK.swapModel(sp, c) then swapped = true end
+                                end
+                            end
+                            if swapped then learned[name] = true; pcall(layout) end
                         end
                     end
                 end
@@ -2856,7 +2916,7 @@ end
 local function buildHub()
 local TS  = game:GetService("TweenService")
 local UIS = game:GetService("UserInputService")
-local VERSION = "v29"
+local VERSION = "v30"
 local pickResp
 
 if getgenv then
