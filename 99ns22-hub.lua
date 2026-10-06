@@ -138,12 +138,44 @@ local function baseAnchor()
 end
 
 -- ================= MODELOS =================
+-- O jogo cria na hora as juntas (Motor6D "<peca>Motor6D") ligando cada peca do pet ao RootPart.
+-- Os modelos guardados vem SEM elas: sem juntas a animacao toca mas nada mexe (asas paradas).
+local function rigLikeGame(m)
+    local inner = m:FindFirstChild("Model")
+    if not (inner and inner:IsA("Model")) then inner = m end
+    local root = inner:FindFirstChild("RootPart")
+    if not (root and root:IsA("BasePart")) then return 0 end
+    local linked = {}
+    for _, j in ipairs(m:GetDescendants()) do
+        if j:IsA("JointInstance") or j:IsA("WeldConstraint") then
+            if j.Part0 then linked[j.Part0] = true end
+            if j.Part1 then linked[j.Part1] = true end
+        end
+    end
+    local n = 0
+    for _, part in ipairs(inner:GetDescendants()) do
+        if part:IsA("BasePart") and part ~= root and not linked[part] then
+            local j = Instance.new("Motor6D")
+            j.Name = part.Name .. "Motor6D"
+            j.Part0, j.Part1 = root, part
+            j.C0 = root.CFrame:Inverse() * part.CFrame
+            j.Parent = part
+            n = n + 1
+        end
+    end
+    return n
+end
+
 local function prep(m)
-    -- partes movidas por Motor6D ficam soltas (senao a animacao nao mexe); o resto fica travado
+    rigLikeGame(m)
+    -- partes presas por junta ficam soltas (a animacao mexe nelas); o resto fica travado
     local jointed = {}
     for _, j in ipairs(m:GetDescendants()) do
-        if j:IsA("Motor6D") and j.Part1 then jointed[j.Part1] = true end
+        if (j:IsA("JointInstance") or j:IsA("WeldConstraint")) and j.Part1 then jointed[j.Part1] = true end
     end
+    local inner = m:FindFirstChild("Model")
+    local rootPart = (inner and inner:FindFirstChild("RootPart")) or m:FindFirstChild("RootPart")
+    if rootPart then jointed[rootPart] = nil end
     for _, p in ipairs(m:GetDescendants()) do
         if p:IsA("BasePart") then
             p.Anchored = not jointed[p]
@@ -312,10 +344,7 @@ local function playAnim(m, name, s)
     local live = liveAnimIds(name)
     dbg.live = #live
     local info = GK and GK.info and GK.info[name]
-    if info and info.rig and GK.rigSig(m) ~= info.rig then
-        dbg.err = "modelo diferente do que o jogo usa (anima quando alguem com esse pet entrar)"
-        return false
-    end
+    if info and info.rig then dbg.rig = (GK.rigSig(m) == info.rig) and "igual ao jogo" or "diferente do jogo" end
     local idle = (mem and (mem.idle or mem.walk)) or (live[1] and live[1].id)
     local walk = (mem and mem.walk) or idle
     dbg.total = idle and 1 or 0
@@ -507,7 +536,8 @@ local wander = true   -- passear pelo cercado
 
 local function spawnModel(src, label)
     local cached = GK and GK.renderCache and GK.renderCache[label]
-    if cached then src = cached end
+    if cached then src = cached
+    elseif GK and GK.petSource then src = GK.petSource(label) or src end
     local ok, m = pcall(function() return src:Clone() end)
     if not ok or not m then return false end
     if not m:IsA("Model") then local w = Instance.new("Model"); m.Parent = w; m = w end
@@ -550,7 +580,7 @@ hb = RunService.Heartbeat:Connect(function(dt)
         local s = spawned[i]
         if not s.model.Parent then
             table.remove(spawned, i)
-        elseif s.home and not s.flying then
+        elseif s.home and not s.flying and not s.carried then
             if roam and not s.still and now > s.nextGoal then
                 if mode == "Base" and penBox then
                     -- anda ate um ponto qualquer do cercado, para um pouco e escolhe outro (como os pets reais)
@@ -951,6 +981,13 @@ end)
 -- Copiamos essa placa (mesmo visual) e aprendemos renda/raridade de cada pet. Fica salvo em arquivo.
 GK = {info = {}, grad = {}, file = "modvip_pet_learn.json", hatchMode = "Rápido", gameFx = true, speedMode = "Flash", treadBonus = 300000, flashChar = true, runSpeed = 300, renderCache = {}, renderPure = {}}
 -- "assinatura" do esqueleto: se o modelo nao tem os mesmos ossos/juntas, a animacao do jogo fica toda errada nele
+function GK.petSource(name)
+    if GK.renderCache[name] then return GK.renderCache[name] end
+    local am = RS:FindFirstChild("AssetModels")
+    if not am then return end
+    local sw = am:FindFirstChild("ToSwap")
+    return (sw and sw:FindFirstChild(name)) or am:FindFirstChild(name)
+end
 function GK.rigSig(m)
     local names = {}
     for _, d in ipairs(m:GetDescendants()) do
@@ -2410,21 +2447,42 @@ tripSteal = function()
         if GK.anim(av, GK.ANIM_CARRY, 1, Enum.AnimationPriority.Movement) and stopArms then stopArms(); stopArms = nil end
         moveAv(av, hrp, deliver, avSpeed, carryStep)
 
-        -- 4) entrega: o ovo vai pro cercado e choca
-        if cs.stopFollow then cs.stopFollow() end
-        if stopArms then stopArms(); stopArms = nil end
+        -- 4) entrega: leva o ovo ate o lugar dele no cercado e planta ali
+        cs.carried = true
         rescale(cs, scale)
         table.insert(spawned, cs)
         layout()
         sim.stolen = sim.stolen + 1
-        voar(cs, carry:GetPivot())
         pcall(GK.redeem, cat, deliver)
+        if cs.home then
+            if simPopup then simPopup("🌱 Plantando o ovo no lugar dele") end
+            local spot = cs.home.Position
+            local toSpot = flat(spot - hrp.Position)
+            local stand = spot - (toSpot.Magnitude > 0.1 and toSpot.Unit * (cs.size.X / 2 + 2.5) or Vector3.zero)
+            moveAv(av, hrp, stand, avSpeed, carryStep)
+            hrp.CFrame = CFrame.lookAt(hrp.Position, Vector3.new(spot.X, hrp.Position.Y, spot.Z))
+        end
+        if cs.stopFollow then cs.stopFollow() end
+        if stopArms then stopArms(); stopArms = nil end
+        avPlay(hum, "idle")
+        if cs.home then
+            local from, to = carry:GetPivot(), cs.home * cs.centerToPivot
+            for i = 1, 10 do carry:PivotTo(from:Lerp(to, i / 10)) task.wait(0.02) end
+            cs.pos = cs.home
+        end
+        cs.carried = false
         addTag(cs)
         task.spawn(chocar, cs, cat)
+        task.wait(0.35)
 
         -- 5) volta pro ninho e monta no monstro pai
         local am = RS:FindFirstChild("AssetModels")
-        local src = am and ((cat and am:FindFirstChild(cat)) or am:GetChildren()[math.random(#am:GetChildren())])
+        local src = cat and GK.petSource(cat)
+        if not src and am then
+            local all = {}
+            for _, m in ipairs(am:GetChildren()) do if m:IsA("Model") then table.insert(all, m) end end
+            src = all[math.random(#all)]
+        end
         if src then
             if simPopup then simPopup("🐉 Voltando pra pegar o pai: " .. src.Name) end
             avPlay(hum, "run")
@@ -2442,17 +2500,24 @@ tripSteal = function()
             mon:PivotTo(CFrame.new(eggPos.X, groundNest + ms.size.Y / 2, eggPos.Z) * ms.centerToPivot)
             if simPopup then simPopup("🐉 Montou no " .. src.Name .. "!") end
             avPlay(hum, "sit")
-            rideTo(ms, hrp, groundNest, deliver, function() return avSpeed() * 1.3 end)
-
-            -- 6) monstro fica no cercado gerando dinheiro (3x)
-            local center = Vector3.new(ms.ridePos.X, groundBase, ms.ridePos.Z)
-            ms.pos = CFrame.new(center) * (frame - frame.Position)
+            -- ja reserva o lugar dele no cercado e vai montado ate la
+            ms.flying = true
             ms.income = incomeFor(src.Name) * 3
             table.insert(spawned, ms)
-            rideMonster = nil
             layout()
+            local target = ms.home and ms.home.Position or deliver
+            rideTo(ms, hrp, groundNest, target, function() return avSpeed() * 1.3 end)
+
+            -- 6) desce do monstro: ele fica no lugar dele gerando dinheiro (3x)
+            if ms.home then
+                ms.model:PivotTo(ms.home * ms.centerToPivot)
+                ms.pos = ms.home
+            end
+            ms.flying = false
+            rideMonster = nil
             pcall(addTag, ms)
-            hrp.CFrame = CFrame.new(Vector3.new(center.X, startCF.Position.Y, center.Z) + frame.RightVector * 6)
+            local here = ms.home and ms.home.Position or target
+            hrp.CFrame = CFrame.new(Vector3.new(here.X, startCF.Position.Y, here.Z) + frame.RightVector * (ms.size.X / 2 + 4))
         end
 
         -- 7) volta pro personagem real
@@ -2461,7 +2526,10 @@ tripSteal = function()
     end)
 
     if stopArms then pcall(stopArms) end
-    if rideMonster and not table.find(spawned, rideMonster) then pcall(function() rideMonster.model:Destroy() end) end
+    if rideMonster then
+        rideMonster.flying = false
+        if not table.find(spawned, rideMonster) then pcall(function() rideMonster.model:Destroy() end) end
+    end
     pcall(stopFx)
     hiding = false
     setRealHidden(false)
@@ -2893,7 +2961,7 @@ end)
 local function petNames()
     local out = {}
     local am = RS:FindFirstChild("AssetModels")
-    if am then for _, m in ipairs(am:GetChildren()) do table.insert(out, m.Name) end end
+    if am then for _, m in ipairs(am:GetChildren()) do if m:IsA("Model") then table.insert(out, m.Name) end end end
     table.sort(out)
     return out
 end
@@ -2916,7 +2984,7 @@ end
 local function buildHub()
 local TS  = game:GetService("TweenService")
 local UIS = game:GetService("UserInputService")
-local VERSION = "v30"
+local VERSION = "v31"
 local pickResp
 
 if getgenv then
