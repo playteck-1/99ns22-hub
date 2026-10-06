@@ -895,7 +895,7 @@ end)
 -- Pets geram dinheiro visual. Esteira da velocidade visual. Salva entre sessoes.
 local HttpService  = game:GetService("HttpService")
 local SIM_FILE = "modvip_sim_save.json"
-local sim = {money = 0, speed = 16, stolen = 0, hatched = 0}
+local sim = {money = 0, speed = 16, stolen = 0, hatched = 0, uiMul = 0}
 pcall(function()
     if isfile and isfile(SIM_FILE) then
         local d = HttpService:JSONDecode(readfile(SIM_FILE))
@@ -2011,6 +2011,7 @@ local function makeAvatar()
     local hum = av:FindFirstChildOfClass("Humanoid")
     local hrp = av:FindFirstChild("HumanoidRootPart")
     if not hum or not hrp then av:Destroy() return end
+    pcall(function() hum.EvaluateStateMachine = true end)
     hum.DisplayDistanceType = Enum.HumanoidDisplayDistanceType.None
     hum.PlatformStand = true
     pcall(function() hum:SetStateEnabled(Enum.HumanoidStateType.Dead, false) end)
@@ -2688,6 +2689,13 @@ do
             hum.DisplayDistanceType = Enum.HumanoidDisplayDistanceType.None
             hum.PlatformStand = true
             pcall(function() hum:SetStateEnabled(Enum.HumanoidStateType.Dead, false) end)
+            -- o Humanoid do boneco para de mexer na fisica (ele religava a colisao do corpo)
+            pcall(function() hum.EvaluateStateMachine = false end)
+            pcall(function() hum:ChangeState(Enum.HumanoidStateType.Physics) end)
+        end
+        local mparts = {}
+        for _, d in ipairs(m:GetDescendants()) do
+            if d:IsA("BasePart") then table.insert(mparts, d) end
         end
         local mroot = m:FindFirstChild("HumanoidRootPart")
         if not mroot then m:Destroy() return false, "modelo sem HumanoidRootPart" end
@@ -2705,6 +2713,11 @@ do
             local r = c and c:FindFirstChild("HumanoidRootPart")
             if not r or not m.Parent then return end
             if c ~= s0.char then s0.char = c; s0.mine = motorsOf(c) end
+            -- nada do boneco pode encostar em voce (senao te arremessa)
+            for _, bp in ipairs(mparts) do
+                if bp.CanCollide then bp.CanCollide = false end
+                if bp.CanTouch then bp.CanTouch = false end
+            end
             -- copia posicao e a pose (cada junta) do seu personagem
             mroot.CFrame = r.CFrame
             for key, mm in pairs(s0.theirs) do
@@ -2843,7 +2856,7 @@ end
 local function buildHub()
 local TS  = game:GetService("TweenService")
 local UIS = game:GetService("UserInputService")
-local VERSION = "v28"
+local VERSION = "v29"
 local pickResp
 
 if getgenv then
@@ -3735,6 +3748,18 @@ do
 end
 
 local pExtra = newPage("Extra", "⚙️", 6)
+section(pExtra, "Tamanho do menu")
+cycle(pExtra, "📱 Tamanho do menu", function()
+    return (sim.uiMul and sim.uiMul > 0) and (math.floor(sim.uiMul * 100 + 0.5) .. "%") or "Automático"
+end, function()
+    local opts = {0, 0.55, 0.65, 0.75, 0.85, 1}
+    local cur = sim.uiMul or 0
+    local i = 1
+    for k, v in ipairs(opts) do if math.abs(v - cur) < 0.01 then i = k end end
+    sim.uiMul = opts[i % #opts + 1]
+    simSave()
+    if GK.applyUI then GK.applyUI() end
+end)
 section(pExtra, "Diagnóstico")
 local function copyDiagnostic()
     local o = {}
@@ -3924,7 +3949,9 @@ local cam = workspace.CurrentCamera
 local isTouch = UIS.TouchEnabled and not UIS.KeyboardEnabled
 local function applyResponsive()
     local vp = cam.ViewportSize
-    local sc = math.clamp(math.min((vp.X - 20) / WW, (vp.Y - 20) / WH), 0.45, 1)
+    -- tamanho do menu: automatico (menor no celular) ou o escolhido na aba Extra
+    local mul = (sim.uiMul and sim.uiMul > 0) and sim.uiMul or (isTouch and 0.72 or 1)
+    local sc = math.clamp(math.min((vp.X - 20) / WW, (vp.Y - 20) / WH), 0.4, 1) * mul
     respScale.Scale = sc
     local compact = isTouch or vp.X < 900 or sc < 0.85
     -- barra lateral: so icones no modo compacto
@@ -3941,7 +3968,7 @@ local function applyResponsive()
     end
     chip.Visible = vp.X >= 520
     -- botao redondo menor no celular
-    local o = isTouch and 64 or 78
+    local o = isTouch and 52 or 78
     orb.Size = UDim2.fromOffset(o, o)
     orbHolder.Size = UDim2.fromOffset(o + 8, o + 8)
     -- notificacoes cabem na tela
@@ -3950,6 +3977,7 @@ local function applyResponsive()
     -- janela de escolher ovo
     pickResp.Scale = math.clamp(math.min((vp.X - 20) / 520, (vp.Y - 20) / 420), 0.45, 1)
 end
+GK.applyUI = applyResponsive
 cam:GetPropertyChangedSignal("ViewportSize"):Connect(function() if alive() then applyResponsive() end end)
 applyResponsive()
 
