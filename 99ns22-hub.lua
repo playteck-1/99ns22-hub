@@ -16,6 +16,19 @@ local function alive() return not getgenv or getgenv().ModVipVisualSession == SE
 local folder = workspace:FindFirstChild("ModVipVisuals") or Instance.new("Folder")
 folder.Name = "ModVipVisuals"; folder.Parent = workspace
 folder:ClearAllChildren()
+-- se o script foi aberto de novo no meio do Correr Flash / skin: solta e mostra o personagem real
+pcall(function()
+    local ch = LP.Character
+    if not ch then return end
+    local hrp = ch:FindFirstChild("HumanoidRootPart")
+    if hrp and hrp.Anchored then hrp.Anchored = false end
+    for _, d in ipairs(ch:GetDescendants()) do
+        if d:IsA("BasePart") or d:IsA("Decal") then d.LocalTransparencyModifier = 0
+        elseif d:IsA("Trail") and d:GetAttribute("MV_WasOn") then d.Enabled = true; d:SetAttribute("MV_WasOn", nil) end
+    end
+    local hum = ch:FindFirstChildOfClass("Humanoid")
+    if hum then workspace.CurrentCamera.CameraSubject = hum end
+end)
 
 local spawned = {}      -- {model, size, centerToPivot}
 local GK                -- o que aprendemos do jogo (preenchido mais abaixo)
@@ -342,6 +355,7 @@ local function playAnim(m, name, s)
     local ac = m:FindFirstChildWhichIsA("AnimationController", true) or m:FindFirstChildWhichIsA("Humanoid", true)
     local dbg = {pet = name, controller = ac and ac.ClassName or "NENHUM", config = 0, index = 0}
     animDebug[#animDebug + 1] = dbg
+    if #animDebug > 60 then table.remove(animDebug, 1) end
     if not ac then return false end
     local animator = ac:FindFirstChildOfClass("Animator") or Instance.new("Animator", ac)
     -- 1) memoria (o que pets reais desse tipo tocaram parado/andando)  2) pet real igual no servidor agora
@@ -937,7 +951,8 @@ end)
 -- Pets geram dinheiro visual. Esteira da velocidade visual. Salva entre sessoes.
 local HttpService  = game:GetService("HttpService")
 local SIM_FILE = "modvip_sim_save.json"
-local sim = {money = 0, speed = 16, stolen = 0, hatched = 0, uiMul = 0}
+local sim = {money = 0, speed = 16, stolen = 0, hatched = 0, uiMul = 0,
+    pmoney = 0, pspeed = 0, phatch = 0, pvip = 0, treadOwned = 1, treadEq = 0, baseMax = 0}
 pcall(function()
     if isfile and isfile(SIM_FILE) then
         local d = HttpService:JSONDecode(readfile(SIM_FILE))
@@ -984,7 +999,8 @@ end)
 -- ===== o que o JOGO mostra nos pets reais (aprendido olhando as bases dos outros jogadores) =====
 -- Gravacao do jogo: cada pet real tem a placa "Data" (DisplayName, PerSecond "$4.6B/s", Odds = raridade).
 -- Copiamos essa placa (mesmo visual) e aprendemos renda/raridade de cada pet. Fica salvo em arquivo.
-GK = {info = {}, grad = {}, file = "modvip_pet_learn.json", hatchMode = "Rápido", gameFx = true, speedMode = "Flash", treadBonus = 300000, flashChar = true, runSpeed = 300, renderCache = {}, renderPure = {}}
+GK = {lite = game:GetService("UserInputService").TouchEnabled and not game:GetService("UserInputService").KeyboardEnabled,
+    info = {}, grad = {}, file = "modvip_pet_learn.json", hatchMode = "Rápido", gameFx = true, speedMode = "Flash", treadBonus = 300000, flashChar = true, runSpeed = 300, renderCache = {}, renderPure = {}}
 -- "assinatura" do esqueleto: se o modelo nao tem os mesmos ossos/juntas, a animacao do jogo fica toda errada nele
 function GK.petSource(name)
     if GK.renderCache[name] then return GK.renderCache[name] end
@@ -1592,6 +1608,7 @@ GK.HATCH = {
     Real = {Common = 20, Uncommon = 25, Rare = 40, Epic = 75, Legendary = 120, Mythic = 240, Cosmic = 480, Secret = 5400, Eternal = 14400, Divine = 43200},
 }
 function GK.hatchTime(cat)
+    if sim.phatch == 1 then return 1 end
     local e = cat and GK.info[cat]
     local t = GK.HATCH[GK.hatchMode] or GK.HATCH["Rápido"]
     return (e and e.rarity and t[e.rarity]) or (GK.hatchMode == "Real" and 60 or HATCH_TIME)
@@ -1837,7 +1854,7 @@ function GK.bolt(a, b)
         if len > 0.05 then
             local seg = Instance.new("Part")
             seg.Anchored = true; seg.CanCollide = false; seg.CanTouch = false; seg.CanQuery = false
-            seg.Material = Enum.Material.Neon
+            seg.Material = Enum.Material.Neon; seg.CastShadow = false
             seg.Color = math.random() < 0.7 and Color3.fromRGB(255, 220, 40) or Color3.fromRGB(255, 110, 20)
             seg.Size = Vector3.new(0.4, 0.4, len)
             seg.CFrame = CFrame.lookAt((prev + p) / 2, p)
@@ -1967,6 +1984,7 @@ task.spawn(function()
                 total = total + s.income
             end
         end
+        total = total * GK.moneyMult()      -- passes da loja
         sim.money = sim.money + total
         sim.income = total
     end
@@ -2041,6 +2059,7 @@ task.spawn(function()
     while task.wait(1) do
         if not alive() then break end
         G.MV_TreadRate = GK.treadBonus or (visualTread and ((visualTreadRate) or treadGain(visualTreadName))) or nil
+        if G.MV_TreadRate then G.MV_TreadRate = G.MV_TreadRate * GK.speedMult() end
         local my, r = myPlot(), root()
         local tb = my and my:FindFirstChild("TreadmillBottom")
         local onIt = GK.onTread == true
@@ -2051,7 +2070,7 @@ task.spawn(function()
         G.MV_OnTread = onIt
         if onIt then
             local gain = G.MV_TreadRate or treadGain(nil)
-            sim.speed = sim.speed + gain
+            sim.speed = sim.speed + gain * GK.speedMult()
             if simPopup and rewriteCount == 0 then simPopup("+" .. fmtMoney(gain) .. " ⚡ Velocidade", true) end
         end
     end
@@ -2566,16 +2585,16 @@ do
             local feet = pos - Vector3.new(0, 1.2, 0)
             boltFrom = boltFrom or feet
             if (feet - boltFrom).Magnitude > 6 then GK.bolt(boltFrom, feet); boltFrom = feet end
-            -- fantasmas amarelos
+            -- fantasmas amarelos (no celular sai menos, pra nao pesar)
             ghostT = ghostT + dt
-            if ghostT > 0.09 then
+            if ghostT > (GK.lite and 0.22 or 0.09) then
                 ghostT = 0
                 for _, part in ipairs(ch:GetChildren()) do
                     if part:IsA("BasePart") and GHOST_PARTS[part.Name] and part.Transparency < 1 then
                         local g = Instance.new("Part")
                         g.Size = part.Size; g.CFrame = part.CFrame; g.Anchored = true
                         g.CanCollide = false; g.CanTouch = false; g.CanQuery = false
-                        g.Material = Enum.Material.Neon; g.Color = Color3.fromRGB(255, 200, 40); g.Transparency = 0.5
+                        g.Material = Enum.Material.Neon; g.Color = Color3.fromRGB(255, 200, 40); g.Transparency = 0.5; g.CastShadow = false
                         g.Parent = folder
                         task.delay(0.03, function()
                             for i = 1, 5 do g.Transparency = 0.5 + i * 0.1 task.wait(0.03) end
@@ -2615,7 +2634,7 @@ do
                 local g = Instance.new("Part")
                 g.Size = part.Size; g.CFrame = part.CFrame; g.Anchored = true
                 g.CanCollide = false; g.CanTouch = false; g.CanQuery = false
-                g.Material = Enum.Material.Neon; g.Color = color; g.Transparency = 0.45
+                g.Material = Enum.Material.Neon; g.Color = color; g.Transparency = 0.45; g.CastShadow = false
                 g.Parent = folder
                 task.delay(0.03, function()
                     for i = 1, 5 do g.Transparency = 0.45 + i * 0.11 task.wait(0.03) end
@@ -2683,7 +2702,7 @@ do
                 boltFrom = boltFrom or feet
                 if (feet - boltFrom).Magnitude > 6 then GK.bolt(boltFrom, feet); boltFrom = feet end
                 ghostT = ghostT + dt
-                if ghostT > 0.06 then ghostT = 0; GK.ghosts(av, Color3.fromRGB(255, 200, 40)) end
+                if ghostT > (GK.lite and 0.18 or 0.06) then ghostT = 0; GK.ghosts(av, Color3.fromRGB(255, 200, 40)) end
                 local an = hum:FindFirstChildOfClass("Animator")
                 if an then
                     for _, tr in ipairs(an:GetPlayingAnimationTracks()) do tr:AdjustSpeed(math.clamp(GK.runSpeed / 60, 1.5, 4)) end
@@ -2728,6 +2747,12 @@ function GK.trailNames()
 end
 function GK.wearTrail(name)
     if GK.trailPart then pcall(function() GK.trailPart:Destroy() end) GK.trailPart = nil end
+    local chr = LP.Character
+    if chr then
+        for _, d in ipairs(chr:GetDescendants()) do
+            if d:IsA("Trail") and d:GetAttribute("MV_WasOn") then d.Enabled = true; d:SetAttribute("MV_WasOn", nil) end
+        end
+    end
     GK.trailName = name
     local ch = LP.Character
     local hrp = ch and ch:FindFirstChild("HumanoidRootPart")
@@ -2774,7 +2799,7 @@ function GK.wearTrail(name)
     GK.trailPart = c
     -- o rastro de verdade some (so pra voce)
     for _, d in ipairs(ch:GetDescendants()) do
-        if d:IsA("Trail") then d.Enabled = false end
+        if d:IsA("Trail") and d.Enabled then d:SetAttribute("MV_WasOn", true); d.Enabled = false end
     end
     return true
 end
@@ -2892,19 +2917,89 @@ function GK.baseDesc()
     if ok2 and d2 then GK.curDesc = d2 return d2 end
 end
 -- itens raros famosos (ids do catalogo do Roblox)
-GK.PRESETS = {
-    {"💀 Headless + Korblox", function(d) d.Head = 134082579; d.RightLeg = 139607718 end},
-    {"👑 Dominus Empyreus", function(d) d.HatAccessory = "21070012" end},
-    {"⚔️ Valkyrie Helm", function(d) d.HatAccessory = "1365767" end},
-    {"🎩 Sparkle Time Fedora", function(d) d.HatAccessory = "1285307" end},
-    {"👑 Domino Crown", function(d) d.HatAccessory = "1031429" end},
-    {"🎧 Clockwork's Shades", function(d) d.FaceAccessory = "11748356" end},
+-- looks completos: trocam cabeca, corpo e acessorios de uma vez (IDs conferidos no catalogo do Roblox)
+GK.LOOKS = {
+    {"💀 Headless Horseman", {Head = 134082579, Torso = 134082557, LeftArm = 134082453, RightArm = 134082473,
+        LeftLeg = 134082507, RightLeg = 134082533}},
+    {"🦴 Korblox Deathspeaker", {Torso = 139607770, LeftArm = 139607570, RightArm = 139607625,
+        LeftLeg = 139607673, RightLeg = 139607718, HatAccessory = "139610147"}},
+    {"👑 Rei Rico", {Head = 134082579, RightLeg = 139607718, HatAccessory = "21070012", HairAccessory = "64082730",
+        BackAccessory = "133195088921746"}},
+    {"❄️ Rei do Gelo", {HatAccessory = "48545806,74891470", FaceAccessory = "11748356", RightLeg = 139607718,
+        BackAccessory = "103893824551005"}},
+    {"🔥 Rei do Inferno", {Head = 134082579, HatAccessory = "31101391,215718515", BackAccessory = "119440121990516"}},
+    {"⚔️ Valquíria", {HatAccessory = "1365767", HairAccessory = "64082730", BackAccessory = "14595630937",
+        FaceAccessory = "11748356"}},
 }
-function GK.wearPreset(i)
+-- itens soltos por parte do corpo (toque de novo pra tirar)
+GK.ITEMS = {
+    {"🎩 Chapéus e coroas", {
+        {"Dominus Empyreus", "HatAccessory", 21070012}, {"Dominus Frigidus", "HatAccessory", 48545806},
+        {"Dominus Infernus", "HatAccessory", 31101391}, {"Dominus Messor", "HatAccessory", 64444871},
+        {"Dominus Aureus", "HatAccessory", 138932314}, {"Valkyrie Helm", "HatAccessory", 1365767},
+        {"Violet Valkyrie", "HatAccessory", 1402432199}, {"Sparkle Time Fedora", "HatAccessory", 1285307},
+        {"Purple Sparkle Fedora", "HatAccessory", 63043890}, {"Domino Crown", "HatAccessory", 1031429},
+        {"The Void Star", "HatAccessory", 1125510}, {"Bighead", "HatAccessory", 1048037},
+        {"Frozen Horns", "HatAccessory", 74891470}, {"Fiery Horns", "HatAccessory", 215718515},
+        {"Poisoned Horns", "HatAccessory", 1744060292}, {"Korblox Hood", "HatAccessory", 139610147},
+    }},
+    {"🙂 Cabeça e rosto", {
+        {"Headless (sem cabeça)", "Head", 134082579}, {"Super Super Happy Face", "Face", 494291269},
+        {"Clockwork's Shades", "FaceAccessory", 11748356},
+    }},
+    {"💇 Cabelo", {
+        {"Rainbow Shaggy", "HairAccessory", 64082730}, {"Shaggy", "HairAccessory", 20573078},
+        {"Beautiful Hair", "HairAccessory", 16630147},
+    }},
+    {"🦴 Corpo", {
+        {"Korblox perna direita", "RightLeg", 139607718}, {"Korblox perna esquerda", "LeftLeg", 139607673},
+        {"Korblox tronco", "Torso", 139607770}, {"Korblox braços", "Arms", {139607570, 139607625}},
+        {"Headless tronco", "Torso", 134082557}, {"Headless braços", "Arms", {134082453, 134082473}},
+        {"Headless pernas", "Legs", {134082507, 134082533}},
+    }},
+    {"🪽 Asas (costas)", {
+        {"Rainbow Wings of Imagination", "BackAccessory", 133195088921746},
+        {"Glowing Rainbow Crystal Wings", "BackAccessory", 138523324413406},
+        {"Demon Lord Wings + Halo", "BackAccessory", 137368186929808},
+        {"Red Phoenix Seraphim Wings", "BackAccessory", 119440121990516},
+        {"Golden Lord Wings", "BackAccessory", 6097774712},
+        {"Blue Valkyrie Wings", "BackAccessory", 14595630937},
+        {"Ice Valkyrie Wings", "BackAccessory", 103893824551005},
+    }},
+}
+GK.MAX_PER_SLOT = 4   -- o Roblox recusa avatar com acessorios demais
+-- poe/tira um item num campo da descricao (acessorios: lista "id,id"; corpo: um id)
+function GK.toggleField(d, field, id)
+    if field == "Arms" then d.LeftArm, d.RightArm = id[1], id[2] return true end
+    if field == "Legs" then d.LeftLeg, d.RightLeg = id[1], id[2] return true end
+    if field:find("Accessory") then
+        local list = {}
+        for x in tostring(d[field] or ""):gmatch("%d+") do table.insert(list, x) end
+        local sid = tostring(id)
+        local at = table.find(list, sid)
+        if at then table.remove(list, at); d[field] = table.concat(list, ",") return false end
+        table.insert(list, sid)
+        while #list > GK.MAX_PER_SLOT do table.remove(list, 1) end
+        d[field] = table.concat(list, ",")
+        return true
+    end
+    if d[field] == id then d[field] = 0 return false end
+    d[field] = id
+    return true
+end
+function GK.wearLook(i)
     local d = GK.baseDesc()
     if not d then return false, "nao consegui ler seu avatar" end
-    GK.PRESETS[i][2](d)
+    for field, v in pairs(GK.LOOKS[i][2]) do d[field] = v end
     return GK.wearDescription(d)
+end
+function GK.wearListed(g, i)
+    local it = GK.ITEMS[g][2][i]
+    local d = GK.baseDesc()
+    if not d then return false, "nao consegui ler seu avatar" end
+    local on = GK.toggleField(d, it[2], it[3])
+    local ok, msg = GK.wearDescription(d)
+    return ok, msg, on
 end
 -- tipo do item (catalogo) -> campo da descricao
 GK.ITEM_FIELD = {
@@ -2916,20 +3011,38 @@ GK.ITEM_FIELD = {
 function GK.wearItem(text)
     local id = tonumber((tostring(text or ""):match("%d+")))
     if not id then return false, "digite o numero (ID) do item" end
-    local ok, info = pcall(function() return game:GetService("MarketplaceService"):GetProductInfo(id) end)
-    if not ok or type(info) ~= "table" then return false, "item nao encontrado" end
-    local field = GK.ITEM_FIELD[info.AssetTypeId]
-    if not field then return false, "esse tipo de item ainda nao da (tipo " .. tostring(info.AssetTypeId) .. ")" end
+    local MS = game:GetService("MarketplaceService")
     local d = GK.baseDesc()
     if not d then return false, "nao consegui ler seu avatar" end
-    if field:find("Accessory") then
-        local cur = d[field]
-        d[field] = (cur ~= "" and (cur .. ",") or "") .. id
-    else
-        d[field] = id
+    local ok, info = pcall(function() return MS:GetProductInfo(id) end)
+    local field = ok and type(info) == "table" and GK.ITEM_FIELD[info.AssetTypeId]
+    if field then
+        GK.toggleField(d, field, id)
+        local r1, r2 = GK.wearDescription(d)
+        return r1, r1 and info.Name or r2
     end
-    local r1, r2 = GK.wearDescription(d)
-    return r1, r1 and info.Name or r2
+    -- nao e item solto: tenta como PACOTE (bundle), ex. 192 = Korblox, 201 = Headless Horseman
+    local okb, bundle = pcall(function() return game:GetService("AssetService"):GetBundleDetailsAsync(id) end)
+    if okb and type(bundle) == "table" and type(bundle.Items) == "table" then
+        local n = 0
+        for _, it in ipairs(bundle.Items) do
+            if it.Type == "Asset" then
+                local oki, inf = pcall(function() return MS:GetProductInfo(it.Id) end)
+                local f = oki and type(inf) == "table" and GK.ITEM_FIELD[inf.AssetTypeId]
+                if f then
+                    if f:find("Accessory") then GK.toggleField(d, f, it.Id) else d[f] = it.Id end
+                    n = n + 1
+                end
+            end
+        end
+        if n == 0 then return false, "pacote sem pecas que da pra vestir" end
+        local r1, r2 = GK.wearDescription(d)
+        return r1, r1 and ((bundle.Name or "pacote") .. " (" .. n .. " pecas)") or r2
+    end
+    if ok and type(info) == "table" then
+        return false, "esse tipo de item ainda nao da (tipo " .. tostring(info.AssetTypeId) .. ")"
+    end
+    return false, "item nao encontrado"
 end
 -- copia o avatar de alguem: jogador do servidor (instantaneo) ou qualquer nome/ID do Roblox
 function GK.wearUser(text)
@@ -2962,6 +3075,103 @@ LP.CharacterAdded:Connect(function()
     if alive() and GK.trailName then pcall(GK.wearTrail, GK.trailName) end
 end)
 
+-- ===== LOJA (so na sua tela): compra com o dinheiro do seu progresso =====
+GK.SHOP_TREADS = {
+    {"Treadmill", "Básica", 0}, {"Sci-FiTreadmill", "Sci-Fi", 5e3}, {"FlameTreadmill", "Flame", 5e4},
+    {"CelebrityTreadmill", "Celebrity", 5e5}, {"GoldenTreadmill", "Golden", 5e6}, {"The FreezeTreadmill", "Freeze", 5e7},
+    {"Lucky BlockTreadmill", "Lucky Block", 5e8}, {"HackerTreadmill", "Hacker", 5e9}, {"DemonicTreadmill", "Demonic", 5e10},
+    {"AngelicTreadmill", "Angelic", 5e11}, {"AstralTreadmill", "Astral", 5e12}, {"GuardianTreadmill", "Guardian (máxima)", 5e13},
+}
+GK.PASSES = {
+    {"pmoney", "💰 2x Dinheiro", 5e6, "seus pets rendem o dobro"},
+    {"pspeed", "⚡ 2x Velocidade", 5e6, "a esteira dá o dobro"},
+    {"phatch", "🐣 Chocar na hora", 2e7, "ovos chocam em 1 segundo"},
+    {"pvip", "💎 VIP 3x Dinheiro", 5e8, "rende 3x (soma com o 2x)"},
+}
+GK.BASE_PRICE = 5e7
+function GK.moneyMult() return (sim.pmoney == 1 and 2 or 1) * (sim.pvip == 1 and 3 or 1) end
+function GK.speedMult() return sim.pspeed == 1 and 2 or 1 end
+-- paga e entrega; se a entrega falhar, nao cobra
+function GK.buy(price, label, fn)
+    if sim.money < price then
+        simPopup("❌ Falta $" .. fmtMoney(price - sim.money) .. " pra " .. label)
+        return false
+    end
+    local ok, res = pcall(fn)
+    if not ok then simPopup("❌ Erro: " .. tostring(res)) return false end
+    if res == false then return false end
+    sim.money = sim.money - price
+    simSave()
+    simPopup("🛒 Comprou " .. label .. (price > 0 and (" por $" .. fmtMoney(price)) or ""))
+    return true
+end
+function GK.petPrice(name, kind)
+    local inc = incomeFor(name)
+    return math.max(100, math.floor(inc * (kind == "egg" and 60 or 180)))
+end
+function GK.setTreadmill(name)
+    local list = treadSources()
+    for i, t in ipairs(list) do
+        if t.Name == name then
+            treadSrcIdx = i - 1
+            nextTreadmill()
+            return visualTreadName == name
+        end
+    end
+    return false
+end
+function GK.buyEgg(cat)
+    if not myPlot() then simPopup("❌ Base não encontrada (aba Base → 📍)") return false end
+    if #spawned >= MAX_ITEMS then simPopup("❌ Base cheia (" .. MAX_ITEMS .. ")") return false end
+    local c = cloneVisual(eggModelFor(cat) or GK.fallbackEgg())
+    if not c then return false end
+    for _, p in ipairs(c:GetDescendants()) do
+        if p:IsA("BasePart") and (p.Name == "Hitbox" or p.Name == "CustomBoundingBox") then p.Transparency = 1 end
+    end
+    c.Name = "Visual_SimEgg"; c.Parent = folder
+    local s = {model = c, phase = 0, nextGoal = 0, still = true, animated = true, isEgg = true, k = 1}
+    measure(s); s.origFoot = math.max(0.5, s.size.X)
+    table.insert(spawned, s)
+    layout()
+    if s.home then c:PivotTo(s.home * s.centerToPivot); s.pos = s.home end
+    addTag(s)
+    task.spawn(chocar, s, cat)
+    return true
+end
+function GK.buyPet(name)
+    if #spawned >= MAX_ITEMS then simPopup("❌ Base cheia (" .. MAX_ITEMS .. ")") return false end
+    local src = GK.petSource(name)
+    if not src then return false end
+    local ok, s = spawnModel(src, name)
+    if not ok or not s then return false end
+    s.income = incomeFor(name)
+    pcall(addTag, s)
+    sim.hatched = sim.hatched + 1
+    return true
+end
+-- pets mais valiosos que o script ja viu nas bases (renda real)
+function GK.topPets(n)
+    local list = {}
+    local am = RS:FindFirstChild("AssetModels")
+    for name, e in pairs(GK.info) do
+        if e.income and am and am:FindFirstChild(name) then table.insert(list, {name, e.income}) end
+    end
+    table.sort(list, function(a, b) return a[2] > b[2] end)
+    local out = {}
+    for i = 1, math.min(n, #list) do out[i] = list[i][1] end
+    return out
+end
+-- volta com a esteira comprada quando a base aparecer
+task.spawn(function()
+    for _ = 1, 30 do
+        if not alive() then return end
+        if myPlot() then break end
+        task.wait(1)
+    end
+    local eq = GK.SHOP_TREADS[sim.treadEq or 0]
+    if eq and eq[1] ~= "Treadmill" then pcall(GK.setTreadmill, eq[1]) end
+end)
+
 -- ================= LISTAS =================
 local function petNames()
     local out = {}
@@ -2989,7 +3199,7 @@ end
 local function buildHub()
 local TS  = game:GetService("TweenService")
 local UIS = game:GetService("UserInputService")
-local VERSION = "v33"
+local VERSION = "v35"
 local pickResp
 
 if getgenv then
@@ -3185,7 +3395,7 @@ closeB.MouseLeave:Connect(function() tween(closeB, 0.15, {BackgroundColor3 = TH.
 local side = Instance.new("Frame", win)
 side.Position = UDim2.fromOffset(14, 62); side.Size = UDim2.new(0, 150, 1, -110)
 side.BackgroundColor3 = TH.panel; corner(side, 14)
-local sideList = Instance.new("UIListLayout", side); sideList.Padding = UDim.new(0, 6)
+local sideList = Instance.new("UIListLayout", side); sideList.Padding = UDim.new(0, 4)
 sideList.SortOrder = Enum.SortOrder.LayoutOrder
 local sidePad = Instance.new("UIPadding", side)
 sidePad.PaddingTop = UDim.new(0, 8); sidePad.PaddingLeft = UDim.new(0, 8); sidePad.PaddingRight = UDim.new(0, 8)
@@ -3252,7 +3462,7 @@ local function newPage(name, icon, order)
     pg:SetAttribute("n", 0)
 
     local tb = Instance.new("TextButton", side)
-    tb.Size = UDim2.new(1, 0, 0, 40); tb.BackgroundColor3 = TH.panel; tb.AutoButtonColor = false
+    tb.Size = UDim2.new(1, 0, 0, 36); tb.BackgroundColor3 = TH.panel; tb.AutoButtonColor = false
     tb.Text = ""; tb.LayoutOrder = order; corner(tb, 10)
     local bar = Instance.new("Frame", tb)
     bar.Size = UDim2.new(0, 4, 0.6, 0); bar.Position = UDim2.new(0, 0, 0.2, 0); bar.BackgroundColor3 = Color3.new(1, 1, 1)
@@ -3800,12 +4010,162 @@ end)
 -- ABA: EXTRA
 -- =====================================================================
 -- =====================================================================
+-- ABA: LOJA (so voce ve; usa o dinheiro do seu progresso)
+-- =====================================================================
+do
+    local pShop = newPage("Loja", "🛒", 5)
+    local function fit(btns)
+        for _, b in ipairs(btns or {}) do
+            b.TextScaled = true; b.TextWrapped = true
+            local c = Instance.new("UITextSizeConstraint", b); c.MaxTextSize = 14; c.MinTextSize = 8
+        end
+        return btns
+    end
+    local wallet = Instance.new("TextLabel", pShop)
+    wallet.Size = UDim2.new(1, 0, 0, 46); wallet.BackgroundColor3 = TH.card; wallet.LayoutOrder = nextOrder(pShop)
+    wallet.Font = FT; wallet.TextSize = 20; wallet.TextColor3 = TH.ok; wallet.Text = ""
+    corner(wallet, 12); stroke(wallet, 1.5, true, 0.2)
+    local refreshers = {}
+
+    section(pShop, "💎 Passes (pra sempre)")
+    for i = 1, #GK.PASSES, 2 do
+        local items = {}
+        for j = i, math.min(i + 1, #GK.PASSES) do
+            local ps = GK.PASSES[j]
+            table.insert(items, {"", "main", function()
+                if sim[ps[1]] == 1 then simPopup("✅ Você já tem " .. ps[2] .. " (" .. ps[4] .. ")") return end
+                GK.buy(ps[3], ps[2], function() sim[ps[1]] = 1 end)
+            end})
+        end
+        local btns = fit(row(pShop, items, 46))
+        for k, b in ipairs(btns) do
+            local ps = GK.PASSES[i + k - 1]
+            table.insert(refreshers, function()
+                b.Text = sim[ps[1]] == 1 and (ps[2] .. "  ✅") or (ps[2] .. "  •  $" .. fmtMoney(ps[3]))
+            end)
+        end
+    end
+
+    section(pShop, "🏃 Esteiras")
+    for i = 1, #GK.SHOP_TREADS, 3 do
+        local items = {}
+        for j = i, math.min(i + 2, #GK.SHOP_TREADS) do
+            local t = GK.SHOP_TREADS[j]
+            table.insert(items, {"", j >= #GK.SHOP_TREADS - 1 and "main" or "card", function()
+                if (sim.treadOwned or 0) >= j then
+                    if GK.setTreadmill(t[1]) then sim.treadEq = j; simSave(); simPopup("🏃 Usando esteira " .. t[2])
+                    else simPopup("❌ Não achei sua esteira (aba Base → 📍)") end
+                    return
+                end
+                GK.buy(t[3], "esteira " .. t[2], function()
+                    if not GK.setTreadmill(t[1]) then simPopup("❌ Não achei sua esteira (aba Base → 📍)") return false end
+                    sim.treadOwned, sim.treadEq = math.max(sim.treadOwned or 0, j), j
+                end)
+            end})
+        end
+        local btns = fit(row(pShop, items, 42))
+        for k, b in ipairs(btns) do
+            local j = i + k - 1
+            local t = GK.SHOP_TREADS[j]
+            table.insert(refreshers, function()
+                if sim.treadEq == j then b.Text = "▶ " .. t[2]
+                elseif (sim.treadOwned or 0) >= j then b.Text = t[2] .. " ✅"
+                else b.Text = t[2] .. "\n$" .. fmtMoney(t[3]) end
+            end)
+        end
+    end
+
+    section(pShop, "🏰 Base")
+    local baseBtn = button(pShop, "", "main", function()
+        if sim.baseMax == 1 then applyMaxBase(); simPopup("🏰 Base máxima aplicada") return end
+        GK.buy(GK.BASE_PRICE, "base nível máximo", function()
+            applyMaxBase()
+            if not visualBase then simPopup("❌ Não deu pra copiar uma base maior agora") return false end
+            sim.baseMax = 1
+        end)
+    end)
+    table.insert(refreshers, function()
+        baseBtn.Text = sim.baseMax == 1 and "🏰 Base nível máximo ✅ (toque pra aplicar)" or ("🏰 Base nível máximo  •  $" .. fmtMoney(GK.BASE_PRICE))
+    end)
+
+    section(pShop, "🥚 Ovo e pet escolhido")
+    local pickLbl = note(pShop, "")
+    local petBtns = fit(row(pShop, {
+        {"", "card", function()
+            if not chosenPet then simPopup("Escolha um pet na aba 🐾 Pets") return end
+            GK.buy(GK.petPrice(chosenPet, "egg"), "ovo de " .. chosenPet, function() return GK.buyEgg(chosenPet) end)
+        end},
+        {"", "main", function()
+            if not chosenPet then simPopup("Escolha um pet na aba 🐾 Pets") return end
+            GK.buy(GK.petPrice(chosenPet, "pet"), chosenPet, function() return GK.buyPet(chosenPet) end)
+        end},
+    }, 46))
+    table.insert(refreshers, function()
+        if chosenPet then
+            pickLbl.Text = "Pet escolhido: " .. chosenPet .. "  (renda $" .. fmtMoney(incomeFor(chosenPet)) .. "/s)"
+            petBtns[1].Text = "🥚 Ovo  •  $" .. fmtMoney(GK.petPrice(chosenPet, "egg"))
+            petBtns[2].Text = "🐾 Pet  •  $" .. fmtMoney(GK.petPrice(chosenPet, "pet"))
+        else
+            pickLbl.Text = "Escolha um pet na aba 🐾 Pets pra comprar o ovo ou o pet."
+            petBtns[1].Text = "🥚 Ovo"
+            petBtns[2].Text = "🐾 Pet"
+        end
+    end)
+
+    section(pShop, "💎 Pets mais valiosos do servidor")
+    local topHolder = Instance.new("Frame", pShop)
+    topHolder.Size = UDim2.new(1, 0, 0, 0); topHolder.AutomaticSize = Enum.AutomaticSize.Y
+    topHolder.BackgroundTransparency = 1; topHolder.LayoutOrder = nextOrder(pShop)
+    local tg = Instance.new("UIGridLayout", topHolder)
+    tg.CellSize = UDim2.new(0.5, -5, 0, 42); tg.CellPadding = UDim2.fromOffset(10, 8)
+    local function fillTop()
+        for _, c in ipairs(topHolder:GetChildren()) do if c:IsA("GuiButton") then c:Destroy() end end
+        local top = GK.topPets(10)
+        if #top == 0 then
+            local b = mkBtn(topHolder, "Ainda aprendendo... visite bases com pets", "card", function() end)
+            fit({b})
+        end
+        for _, name in ipairs(top) do
+            local price = GK.petPrice(name, "pet")
+            local b = mkBtn(topHolder, "🐾 " .. name .. "\n$" .. fmtMoney(price), "card", function()
+                GK.buy(price, name, function() return GK.buyPet(name) end)
+            end)
+            fit({b})
+        end
+    end
+    button(pShop, "🔄 Atualizar lista", "card", fillTop)
+    task.delay(10, function() pcall(fillTop) end)
+
+    section(pShop, "🎁 Dinheiro")
+    row(pShop, {
+        {"🎁 +$1B", "card", function() sim.money = sim.money + 1e9; simSave(); simPopup("🎁 +$1B") end},
+        {"🎁 +$1T", "card", function() sim.money = sim.money + 1e12; simSave(); simPopup("🎁 +$1T") end},
+        {"🎁 +$1Qa", "card", function() sim.money = sim.money + 1e15; simSave(); simPopup("🎁 +$1Qa") end},
+    }, 40)
+    note(pShop, "Tudo da loja aparece só pra você e fica salvo pra próxima vez.")
+
+    task.spawn(function()
+        while task.wait(0.5) do
+            if not alive() then break end
+            wallet.Text = "💰 $" .. fmtMoney(sim.money)
+            for _, f in ipairs(refreshers) do pcall(f) end
+        end
+    end)
+end
+
+-- =====================================================================
 -- ABA: SKINS (so voce ve)
 -- =====================================================================
 do
-    local pSkin = newPage("Skins", "👕", 5)
+    local pSkin = newPage("Skins", "👕", 6)
     local function done(ok, msg, okText)
         simPopup(ok and ("✅ " .. (okText or "Pronto")) or ("❌ " .. tostring(msg)))
+    end
+    local function fit(btns)
+        for _, b in ipairs(btns or {}) do
+            b.TextScaled = true; b.TextWrapped = true
+            local c = Instance.new("UITextSizeConstraint", b); c.MaxTextSize = 14; c.MinTextSize = 8
+        end
     end
     local function inputRow(pg, placeholder, btnText, cb)
         local fr = Instance.new("Frame", pg)
@@ -3836,20 +4196,36 @@ do
     end
     button(pSkin, "❌ Tirar rastro", "card", function() GK.wearTrail(nil); simPopup("Rastro removido") end)
 
-    section(pSkin, "💎 Itens raros")
-    for i = 1, #GK.PRESETS, 2 do
+    section(pSkin, "👑 Looks completos (cabeça + corpo)")
+    for i = 1, #GK.LOOKS, 2 do
         local items = {}
-        for j = i, math.min(i + 1, #GK.PRESETS) do
-            table.insert(items, {GK.PRESETS[j][1], "card", function()
-                simPopup("⏳ Vestindo " .. GK.PRESETS[j][1] .. "...")
-                local ok, msg = GK.wearPreset(j)
-                done(ok, msg, GK.PRESETS[j][1])
+        for j = i, math.min(i + 1, #GK.LOOKS) do
+            table.insert(items, {GK.LOOKS[j][1], "main", function()
+                simPopup("⏳ Vestindo " .. GK.LOOKS[j][1] .. "...")
+                local ok, msg = GK.wearLook(j)
+                done(ok, msg, GK.LOOKS[j][1])
             end})
         end
-        row(pSkin, items, 42)
+        fit(row(pSkin, items, 44))
     end
-    note(pSkin, "Os itens se somam: dá pra usar Headless + Dominus + Valkyrie juntos.")
-    inputRow(pSkin, "ID de qualquer item do catálogo", "👕 Vestir", function(t)
+    for g, grp in ipairs(GK.ITEMS) do
+        section(pSkin, grp[1])
+        for i = 1, #grp[2], 2 do
+            local items = {}
+            for j = i, math.min(i + 1, #grp[2]) do
+                local it = grp[2][j]
+                table.insert(items, {it[1], "card", function()
+                    simPopup("⏳ " .. it[1] .. "...")
+                    local ok, msg, on = GK.wearListed(g, j)
+                    done(ok, msg, (on and "Vestiu: " or "Tirou: ") .. it[1])
+                end})
+            end
+            fit(row(pSkin, items, 40))
+        end
+    end
+    note(pSkin, "Os itens se somam (até " .. GK.MAX_PER_SLOT .. " por parte). Toque de novo num item pra tirar.")
+    section(pSkin, "🔎 Qualquer item ou pacote")
+    inputRow(pSkin, "ID de item ou pacote do catálogo", "👕 Vestir", function(t)
         simPopup("⏳ Procurando item...")
         local ok, msg = GK.wearItem(t)
         done(ok, msg, msg)
@@ -3885,7 +4261,7 @@ do
     note(pSkin, "Tudo aqui aparece só pra você. Pros outros jogadores nada muda.")
 end
 
-local pExtra = newPage("Extra", "⚙️", 6)
+local pExtra = newPage("Extra", "⚙️", 7)
 section(pExtra, "Tamanho do menu")
 cycle(pExtra, "📱 Tamanho do menu", function()
     return (sim.uiMul and sim.uiMul > 0) and (math.floor(sim.uiMul * 100 + 0.5) .. "%") or "Automático"
