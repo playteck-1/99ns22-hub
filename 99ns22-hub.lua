@@ -145,16 +145,20 @@ local function rigLikeGame(m)
     if not (inner and inner:IsA("Model")) then inner = m end
     local root = inner:FindFirstChild("RootPart")
     if not (root and root:IsA("BasePart")) then return 0 end
-    local linked = {}
+    local hasMotor = {}
     for _, j in ipairs(m:GetDescendants()) do
-        if j:IsA("JointInstance") or j:IsA("WeldConstraint") then
-            if j.Part0 then linked[j.Part0] = true end
-            if j.Part1 then linked[j.Part1] = true end
+        if j:IsA("Motor6D") and j.Part1 then hasMotor[j.Part1] = true end
+    end
+    -- tira as colas das pecas do pet (elas travavam asas/cauda no lugar)
+    for _, j in ipairs(inner:GetDescendants()) do
+        if (j:IsA("Weld") or j:IsA("WeldConstraint") or j:IsA("ManualWeld")) and j.Part0 and j.Part1
+            and j.Part0:IsDescendantOf(inner) and j.Part1:IsDescendantOf(inner) then
+            j:Destroy()
         end
     end
     local n = 0
     for _, part in ipairs(inner:GetDescendants()) do
-        if part:IsA("BasePart") and part ~= root and not linked[part] then
+        if part:IsA("BasePart") and part ~= root and not hasMotor[part] then
             local j = Instance.new("Motor6D")
             j.Name = part.Name .. "Motor6D"
             j.Part0, j.Part1 = root, part
@@ -163,6 +167,7 @@ local function rigLikeGame(m)
             n = n + 1
         end
     end
+    m:SetAttribute("MV_Rigged", n)
     return n
 end
 
@@ -2984,7 +2989,7 @@ end
 local function buildHub()
 local TS  = game:GetService("TweenService")
 local UIS = game:GetService("UserInputService")
-local VERSION = "v31"
+local VERSION = "v33"
 local pickResp
 
 if getgenv then
@@ -3282,7 +3287,12 @@ local function styleBtn(b, style)
     b.BackgroundColor3 = TH.card
     for _, c in ipairs(b:GetChildren()) do if c:IsA("UIGradient") then c:Destroy() end end
     if style == "main" then
-        b.BackgroundColor3 = Color3.new(1, 1, 1); grad(b, false, 0)
+        -- degrade so de claro/escuro: um degrade colorido pintava o TEXTO da mesma cor do fundo (sumia)
+        b.BackgroundColor3 = Color3.fromRGB(140, 60, 240)
+        local g = Instance.new("UIGradient")
+        g.Color = ColorSequence.new(Color3.new(1, 1, 1), Color3.fromRGB(205, 205, 205))
+        g.Rotation = 90; g.Parent = b
+        b.TextStrokeTransparency = 0.35
     elseif style == "ok" then b.BackgroundColor3 = Color3.fromRGB(30, 150, 90)
     elseif style == "bad" then b.BackgroundColor3 = Color3.fromRGB(170, 40, 60)
     elseif style == "gold" then b.BackgroundColor3 = Color3.fromRGB(200, 140, 20)
@@ -3910,6 +3920,57 @@ local function copyDiagnostic()
     for i, s in ipairs(spawned) do
         L(("  %d %s home=%s pos=%s anim=%s"):format(i, s.model.Name, s.home and tostring(s.home.Position) or "nil",
             tostring(s.model:GetPivot().Position), tostring(s.animated)))
+    end
+    -- raio-x da animacao de cada pet seu
+    local function rigInfo(model)
+        local mot, bones, anch, free = 0, 0, 0, 0
+        for _, d in ipairs(model:GetDescendants()) do
+            if d:IsA("Motor6D") then mot = mot + 1
+            elseif d:IsA("Bone") then bones = bones + 1
+            elseif d:IsA("BasePart") then if d.Anchored then anch = anch + 1 else free = free + 1 end end
+        end
+        return ("motor6d=%d ossos=%d pecas presas=%d soltas=%d"):format(mot, bones, anch, free)
+    end
+    for i, s in ipairs(spawned) do
+        if i > 8 then break end
+        local nm = s.petName or "?"
+        local e = GK.info[nm] or {}
+        L(("RAIOX %s | criadas=%s | %s | memoria idle=%s walk=%s | rig nosso=%s jogo=%s | daRender=%s"):format(nm,
+            tostring(s.model:GetAttribute("MV_Rigged")), rigInfo(s.model),
+            tostring(e.anims and e.anims.idle), tostring(e.anims and e.anims.walk),
+            GK.rigSig(s.model), tostring(e.rig), tostring(s.fromRender)))
+        for _, an in ipairs(s.model:GetDescendants()) do
+            if an:IsA("Animator") then
+                local list = an:GetPlayingAnimationTracks()
+                L(("   animator em %s: %d tocando"):format(an.Parent and an.Parent.Name or "?", #list))
+                for _, tr in ipairs(list) do
+                    L(("     %s len=%.2f pos=%.2f vel=%.2f peso=%.2f tocando=%s"):format(
+                        tr.Animation and tr.Animation.AnimationId or "?", tr.Length, tr.TimePosition, tr.Speed, tr.WeightCurrent, tostring(tr.IsPlaying)))
+                end
+            end
+        end
+        -- o mesmo pet de verdade numa base, pra comparar
+        local cra1 = workspace:FindFirstChild("ClientRenderedAssets")
+        if cra1 then
+            for _, pm in ipairs(cra1:GetChildren()) do
+                local data = pm:FindFirstChild("Data")
+                local dn = data and data:FindFirstChild("DisplayName")
+                if GK.baseName(pm, dn and dn.Text or nil) == nm then
+                    L("   REAL: " .. rigInfo(pm))
+                    local joints = {}
+                    for _, j in ipairs(pm:GetDescendants()) do
+                        if j:IsA("Motor6D") then table.insert(joints, (j.Part0 and j.Part0.Name or "?") .. ">" .. (j.Part1 and j.Part1.Name or "?")) end
+                    end
+                    L("   REAL juntas: " .. table.concat(joints, ", "):sub(1, 600))
+                    break
+                end
+            end
+        end
+        local mj = {}
+        for _, j in ipairs(s.model:GetDescendants()) do
+            if j:IsA("Motor6D") then table.insert(mj, (j.Part0 and j.Part0.Name or "?") .. ">" .. (j.Part1 and j.Part1.Name or "?")) end
+        end
+        L("   NOSSO juntas: " .. table.concat(mj, ", "):sub(1, 600))
     end
     for _, d in ipairs(animDebug) do
         L(("anim %s ctrl=%s live=%s config=%s index=%s total=%s tocou=%s err=%s"):format(d.pet, d.controller,
