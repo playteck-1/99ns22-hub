@@ -533,14 +533,29 @@ local function layoutBase()
     for _, s in ipairs(spawned) do biggest = math.max(biggest, (s.origFoot or 8) * scale) end
     local f = math.max(8, biggest)   -- espaco de cada pet = maior pet (nunca encolhe sozinho)
     local cols = math.max(1, math.floor((W + GAP) / (f + GAP)))
+    -- pets grandes (ex. 10x) nao cabem em fileiras: em vez de ir pra fora da base,
+    -- divide o cercado em casas iguais e todos ficam DENTRO dele (podem encostar uns nos outros)
+    local packed = n > 0 and (math.ceil(n / cols) * (f + GAP) > D + GAP)
+    local pCols, pRows = cols, 1
+    if packed then
+        pCols = math.max(1, math.min(n, math.ceil(math.sqrt(n * W / math.max(D, 1)))))
+        pRows = math.ceil(n / pCols)
+    end
     local feetY = floorY or (frame.Position.Y - 0.5)
     penBox = {frame = frame, x0 = x0, x1 = x1, z0 = z0, z1 = z1}
     local rot = frame - frame.Position
     for i, s in ipairs(spawned) do
         rescale(s, scale)
-        local col, row = (i - 1) % cols, math.floor((i - 1) / cols)
-        local x = x0 + (col + 0.5) * (W / cols)
-        local z = z0 + row * (f + GAP) + f / 2
+        local x, z
+        if packed then
+            local col, row = (i - 1) % pCols, math.floor((i - 1) / pCols)
+            x = x0 + (col + 0.5) * (W / pCols)
+            z = z0 + (row + 0.5) * (D / pRows)
+        else
+            local col, row = (i - 1) % cols, math.floor((i - 1) / cols)
+            x = x0 + (col + 0.5) * (W / cols)
+            z = z0 + row * (f + GAP) + f / 2
+        end
         local wp = frame:PointToWorldSpace(Vector3.new(x, 0, z))
         s.home = CFrame.new(wp.X, feetY + s.size.Y / 2, wp.Z) * rot
         s.slotW = f + GAP
@@ -3381,7 +3396,7 @@ end
 local function buildHub()
 local TS  = game:GetService("TweenService")
 local UIS = game:GetService("UserInputService")
-local VERSION = "v41"
+local VERSION = "v42"
 local pickResp
 
 if getgenv then
