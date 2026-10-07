@@ -1346,6 +1346,7 @@ local AREA_POS = {
     Snow = Vector3.new(1489.0, 69.3, -317.8), Volcano = Vector3.new(1884.5, 69.3, -400.6),
     ["Abyss Ocean"] = Vector3.new(2278.2, 68.7, -330.1), Prehistoric = Vector3.new(2818.9, 68.1, -401.0),
     Cosmic = Vector3.new(3397.5, 69.6, -322.7),
+    ["Enchanted Forest"] = Vector3.new(6693.6, 68.0, -354.4),
 }
 local RARITY_AREA = {
     Common = "Forest", Uncommon = "Lake", Rare = "Desert", SuperRare = "Jungle", Epic = "Snow",
@@ -1448,6 +1449,14 @@ local function areaFromGallery(name)
 end
 
 -- memoria: pet -> area aprendido dos ovos que nascem no mapa (salvo em arquivo)
+-- centro de cada area aprendido dos ovos que nascem nela (salvo: as areas novas tambem ficam conhecidas)
+local AREA_POS_FILE, areaPosMem = "modvip_area_pos.json", {}
+pcall(function()
+    if isfile and isfile(AREA_POS_FILE) then
+        local d = game:GetService("HttpService"):JSONDecode(readfile(AREA_POS_FILE))
+        if type(d) == "table" then areaPosMem = d end
+    end
+end)
 local AREA_MEM_FILE = "modvip_pet_areas.json"
 local areaMem = {}
 pcall(function()
@@ -1467,6 +1476,27 @@ task.spawn(function()
         if changed then
             pcall(function()
                 if writefile then writefile(AREA_MEM_FILE, game:GetService("HttpService"):JSONEncode(areaMem)) end
+            end)
+        end
+        -- centro de cada area pelos ovos vistos agora
+        local sums, posChanged = {}, false
+        for _, d in pairs(eggCat) do
+            if d.area and d.pos then
+                local e = sums[d.area] or {Vector3.zero, 0}
+                sums[d.area] = {e[1] + d.pos, e[2] + 1}
+            end
+        end
+        for ar, e in pairs(sums) do
+            local c = e[1] / e[2]
+            local old = areaPosMem[ar]
+            if type(old) ~= "table" or (Vector3.new(old[1], old[2], old[3]) - c).Magnitude > 5 then
+                areaPosMem[ar] = {math.floor(c.X * 10) / 10, math.floor(c.Y * 10) / 10, math.floor(c.Z * 10) / 10}
+                posChanged = true
+            end
+        end
+        if posChanged then
+            pcall(function()
+                if writefile then writefile(AREA_POS_FILE, game:GetService("HttpService"):JSONEncode(areaPosMem)) end
             end)
         end
     end
@@ -1598,6 +1628,8 @@ local function areaPos(area)
             if a == area and m:IsA("Model") then return m:GetPivot().Position end
         end
     end
+    local mem = areaPosMem[area]
+    if type(mem) == "table" and mem[1] then return Vector3.new(mem[1], mem[2], mem[3]) end
     return AREA_POS[area]
 end
 
@@ -2491,6 +2523,10 @@ tripSteal = function()
             end
         end
     end
+    if not egg and not eggPos and chosenPet and petAreaName then
+        if simPopup then simPopup("📍 Ainda não sei onde fica " .. petAreaName .. ". Passe por lá uma vez (ou espere um ovo nascer lá) que eu aprendo.") end
+        return
+    end
     if not egg and not eggPos and chosenPet then
         -- area do pet desconhecida: usa a area do painel (ou Cosmic), nunca aleatoria
         petAreaName = (simArea ~= "Todas" and simArea) or "Cosmic"
@@ -3098,6 +3134,41 @@ function GK.toggleField(d, field, id)
     d[field] = id
     return true
 end
+-- pacotes de corpo inteiro mais caros do catalogo (IDs e tipos conferidos na API do Roblox)
+GK.BUNDLES = {
+    {"Headless Horseman", {LeftArm = 134082453, RightArm = 134082473, LeftLeg = 134082507, RightLeg = 134082533, Torso = 134082557, Head = 15093053680}},
+    {"Korblox Deathspeaker", {LeftArm = 139607570, RightArm = 139607625, LeftLeg = 139607673, RightLeg = 139607718, Torso = 139607770, HatAccessory = "139610147"}},
+    {"Ten Million Robux Man", {LeftArm = 835773716, RightArm = 835774674, LeftLeg = 835775204, RightLeg = 835775885, Torso = 835776319, HairAccessory = "835777026"}},
+    {"Golden Suit of Bling Squared", {LeftArm = 241557519, LeftLeg = 241557808, RightArm = 241558158, RightLeg = 241558326, Torso = 241558644}},
+    {"Korblox Lord of Death", {LeftArm = 223824598, RightArm = 223825145, LeftLeg = 223825310, RightLeg = 223825496, Torso = 223825618, HatAccessory = "223825761", BackAccessory = "223825893"}},
+    {"Korblox: Savage General", {LeftArm = 2517343580, LeftLeg = 2517344691, RightArm = 2517346110, RightLeg = 2517347369, Torso = 2517348394, HatAccessory = "2517351226", Head = 72319106003274}},
+    {"Knights of Redcliff: General", {LeftArm = 2535448156, LeftLeg = 2535449896, RightArm = 2535451619, RightLeg = 2535452975, Torso = 2535456472, HatAccessory = "2535459925", Head = 80379835921754}},
+    {"Overseer: Overlord", {LeftArm = 2535466878, LeftLeg = 2535468990, RightArm = 2535469850, RightLeg = 2535479590, Torso = 2535471525, HatAccessory = "2535476249", Head = 76258585271024}},
+    {"Korblox: Dark Warlock", {LeftArm = 2535843069, LeftLeg = 2535844249, RightArm = 2535844928, RightLeg = 2535845315, Torso = 2535845802, HatAccessory = "2535841957", Head = 97367658231094}},
+    {"Divine Guardian", {LeftArm = 184877487, LeftLeg = 184877562, RightArm = 184877597, RightLeg = 184877626, Torso = 184877660, HatAccessory = "184877708"}},
+    {"Dark Avenger", {LeftArm = 139581117, RightArm = 139581174, LeftLeg = 139581230, RightLeg = 139581292, Torso = 139581375, BackAccessory = "139581559", HatAccessory = "139581668"}},
+    {"Redcliff Elite Commander", {HatAccessory = "101716654", LeftArm = 101716715, LeftLeg = 101716775, RightArm = 101716824, RightLeg = 101743120, Torso = 101716931}},
+    {"The Overseer", {Torso = 81725326, RightArm = 81725366, LeftArm = 81725392, LeftLeg = 81725429, RightLeg = 81725459}},
+    {"Korblox General", {Torso = 68539149, RightArm = 68539179, LeftArm = 68539213, LeftLeg = 68539233, RightLeg = 68539263}},
+    {"Lord Jahrfyre the Grim", {Torso = 33378366, RightArm = 33378438, LeftArm = 33378484, LeftLeg = 33378522, RightLeg = 33378540}},
+    {"Captain Skeledeath", {LeftArm = 188835233, RightArm = 188835327, LeftLeg = 188835428, RightLeg = 188835511, Torso = 188835586, HatAccessory = "188835673"}},
+    {"Misfortune's Guardian", {LeftArm = 184878859, LeftLeg = 184878888, RightArm = 184878928, RightLeg = 184878965, Torso = 184879000, HatAccessory = "184879039", BackAccessory = "184879088"}},
+    {"The Doombringer", {Torso = 98584313, RightArm = 98584347, LeftArm = 98584356, LeftLeg = 98584374, RightLeg = 98584395}},
+    {"Sunstar", {LeftArm = 2506386474, LeftLeg = 2506396295, RightArm = 2506395458, RightLeg = 2506397317, Torso = 2506397945, HatAccessory = "2506412950", Head = 122720038480699}},
+    {"Knight of Splintered Skies Ascendant", {LeftArm = 2506713855, LeftLeg = 2506715959, RightArm = 2506717119, RightLeg = 2506718673, Torso = 2506719786, HatAccessory = "2506723543", Head = 77947704881762}},
+    {"Sun Slayer", {LeftArm = 1829090584, RightArm = 1829092545, LeftLeg = 1829093729, RightLeg = 1829094998, Torso = 1829095996, HatAccessory = "1829089961"}},
+    {"SinisterBot 5001", {HatAccessory = "1678223812", LeftArm = 1678225030, RightArm = 1678226510, LeftLeg = 1678228497, RightLeg = 1678229619, Torso = 1678230753}},
+    {"BattleBot 5000", {LeftArm = 689353667, RightArm = 689354372, LeftLeg = 689354916, RightLeg = 689355509, Torso = 689356325, HatAccessory = "689357409"}},
+    {"Red Futurion", {LeftArm = 91657680, LeftLeg = 91657749, RightArm = 91657884, RightLeg = 91657986, Torso = 91658092, HatAccessory = "90249118"}},
+    {"Typhinius the Gatekeeper", {LeftArm = 2261885812, RightArm = 2261889458, LeftLeg = 2261890704, RightLeg = 2261891808, Torso = 2261892873, HatAccessory = "2261884342"}},
+    {"Empyrean Armor", {Torso = 77517452, RightArm = 77517535, LeftArm = 77517582, LeftLeg = 77517631, RightLeg = 77517683}},
+}
+function GK.wearFields(fields)
+    local d = GK.baseDesc()
+    if not d then return false, "nao consegui ler seu avatar" end
+    for field, v in pairs(fields) do d[field] = v end
+    return GK.wearDescription(d)
+end
 function GK.wearLook(i)
     local d = GK.baseDesc()
     if not d then return false, "nao consegui ler seu avatar" end
@@ -3116,7 +3187,7 @@ end
 GK.ITEM_FIELD = {
     [8] = "HatAccessory", [41] = "HairAccessory", [42] = "FaceAccessory", [43] = "NeckAccessory",
     [44] = "ShouldersAccessory", [45] = "FrontAccessory", [46] = "BackAccessory", [47] = "WaistAccessory",
-    [17] = "Head", [18] = "Face", [11] = "Shirt", [12] = "Pants", [2] = "GraphicTShirt",
+    [17] = "Head", [79] = "Head", [18] = "Face", [11] = "Shirt", [12] = "Pants", [2] = "GraphicTShirt",
     [27] = "Torso", [28] = "RightArm", [29] = "LeftArm", [30] = "LeftLeg", [31] = "RightLeg",
 }
 function GK.wearItem(text)
@@ -3310,7 +3381,7 @@ end
 local function buildHub()
 local TS  = game:GetService("TweenService")
 local UIS = game:GetService("UserInputService")
-local VERSION = "v40"
+local VERSION = "v41"
 local pickResp
 
 if getgenv then
@@ -4319,6 +4390,19 @@ do
     end
     button(pSkin, "❌ Tirar rastro", "card", function() GK.wearTrail(nil); simPopup("Rastro removido") end)
 
+    section(pSkin, "🛡️ Pacotes de corpo inteiro (os mais caros)")
+    for i = 1, #GK.BUNDLES, 2 do
+        local items = {}
+        for j = i, math.min(i + 1, #GK.BUNDLES) do
+            local b = GK.BUNDLES[j]
+            table.insert(items, {b[1], j <= 2 and "main" or "card", function()
+                simPopup("⏳ Vestindo " .. b[1] .. "...")
+                local ok, msg = GK.wearFields(b[2])
+                done(ok, msg, b[1])
+            end})
+        end
+        fit(row(pSkin, items, 40))
+    end
     section(pSkin, "👑 Looks completos (cabeça + corpo)")
     for i = 1, #GK.LOOKS, 2 do
         local items = {}
