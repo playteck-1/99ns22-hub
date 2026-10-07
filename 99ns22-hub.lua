@@ -187,17 +187,41 @@ end
 
 local function prep(m)
     rigLikeGame(m)
-    -- partes presas por junta ficam soltas (a animacao mexe nelas); o resto fica travado
-    local jointed = {}
-    for _, j in ipairs(m:GetDescendants()) do
-        if (j:IsA("JointInstance") or j:IsA("WeldConstraint")) and j.Part1 then jointed[j.Part1] = true end
-    end
+    -- O pet inteiro vira UM bloco preso no RootPart (so ele fica ancorado).
+    -- Malha com ossos (asas, corpo) so deforma se estiver no MESMO bloco dos ossos:
+    -- antes as pecas sem junta ficavam ancoradas soltas e a animacao tocava sem mexer nada.
     local inner = m:FindFirstChild("Model")
     local rootPart = (inner and inner:FindFirstChild("RootPart")) or m:FindFirstChild("RootPart")
-    if rootPart then jointed[rootPart] = nil end
+        or m:FindFirstChild("HumanoidRootPart") or (m:IsA("Model") and m.PrimaryPart) or m:FindFirstChildWhichIsA("BasePart", true)
+    local reach = {}
+    if rootPart then
+        local adj = {}
+        local function link(a, b)
+            adj[a] = adj[a] or {}; adj[b] = adj[b] or {}
+            table.insert(adj[a], b); table.insert(adj[b], a)
+        end
+        for _, j in ipairs(m:GetDescendants()) do
+            if (j:IsA("JointInstance") or j:IsA("WeldConstraint")) and j.Part0 and j.Part1 then link(j.Part0, j.Part1) end
+        end
+        reach[rootPart] = true
+        local q, qi = {rootPart}, 1
+        while q[qi] do
+            for _, nb in ipairs(adj[q[qi]] or {}) do
+                if not reach[nb] then reach[nb] = true; table.insert(q, nb) end
+            end
+            qi = qi + 1
+        end
+        for _, part in ipairs(m:GetDescendants()) do
+            if part:IsA("BasePart") and part ~= rootPart and not reach[part] then
+                local w = Instance.new("WeldConstraint")
+                w.Part0, w.Part1 = rootPart, part
+                w.Parent = part
+            end
+        end
+    end
     for _, p in ipairs(m:GetDescendants()) do
         if p:IsA("BasePart") then
-            p.Anchored = not jointed[p]
+            p.Anchored = (p == rootPart) or not rootPart
             p.CanCollide = false; p.CanTouch = false; p.CanQuery = false
             p.Massless = true
         elseif p:IsA("Script") or p:IsA("LocalScript") then
@@ -3286,7 +3310,7 @@ end
 local function buildHub()
 local TS  = game:GetService("TweenService")
 local UIS = game:GetService("UserInputService")
-local VERSION = "v38"
+local VERSION = "v40"
 local pickResp
 
 if getgenv then
@@ -3918,12 +3942,24 @@ paintModes()
 cycle(pPets, "📏 Tamanho dos pets", function()
     return (scale == 1 and "Original" or (scale .. "x"))
 end, function()
-    local opts = {0.5, 0.75, 1, 1.5, 2, 3}
+    local opts = {0.5, 0.75, 1, 1.5, 2, 3, 4, 5, 7, 10}
     local i = table.find(opts, scale) or 3
     scale = opts[i % #opts + 1]
     layout()
     simPopup("📏 Tamanho: " .. (scale == 1 and "original" or (scale .. "x")))
 end)
+-- atalhos de tamanho (sem ter que passar por todos)
+local function setScale(k)
+    scale = k
+    layout()
+    simPopup("📏 Tamanho: " .. (k == 1 and "original" or (k .. "x")))
+end
+row(pPets, {
+    {"1x", "card", function() setScale(1) end},
+    {"3x", "card", function() setScale(3) end},
+    {"5x", "card", function() setScale(5) end},
+    {"10x", "main", function() setScale(10) end},
+}, 36)
 toggle(pPets, "🚶 Pets passeiam pelo cercado", function() return wander end, function(v) wander = v end)
 row(pPets, {
     {"↩ Remover último", "card", function()
