@@ -366,6 +366,11 @@ local function playAnim(m, name, s)
     local info = GK and GK.info and GK.info[name]
     if info and info.rig then dbg.rig = (GK.rigSig(m) == info.rig) and "igual ao jogo" or "diferente do jogo" end
     local idle = (mem and (mem.idle or mem.walk)) or (live[1] and live[1].id)
+    if not idle then
+        local cfg = animIdsFromConfig(name)
+        dbg.config = #cfg
+        if cfg[1] then idle = cfg[1].id; dbg.fonte = "config do pet" end
+    end
     local walk = (mem and mem.walk) or idle
     dbg.total = idle and 1 or 0
     if not idle then dbg.err = "nenhum pet real desse tipo visto ainda (aprende sozinho quando aparecer um)" return false end
@@ -2209,11 +2214,28 @@ end
 local function flat(v) return Vector3.new(v.X, 0, v.Z) end
 
 -- anda/corre em linha reta (altura fixa); onStep(cf) pra levar coisas junto
+-- raio pro chao: ignora pets, ovos, guardas e as nossas copias
+local function groundParams()
+    local list = {folder}
+    if LP.Character then table.insert(list, LP.Character) end
+    for _, n in ipairs({"AreaEggSlotsClient", "ClientRenderedAssets", "PlacedEggRenders", "__ClientTreadmillRenders"}) do
+        local f = workspace:FindFirstChild(n)
+        if f then table.insert(list, f) end
+    end
+    pcall(function() table.insert(list, workspace.World.Areas.GuardAreas) end)
+    local rp = RaycastParams.new()
+    rp.FilterType = Enum.RaycastFilterType.Exclude
+    rp.FilterDescendantsInstances = list
+    return rp
+end
 local function moveAv(av, hrp, target, speedFn, onStep)
     local y = hrp.Position.Y
     target = Vector3.new(target.X, y, target.Z)
     local animator = av:FindFirstChildWhichIsA("Animator", true)
     local tick0 = 0
+    local rp = groundParams()
+    local g0 = workspace:Raycast(hrp.Position + Vector3.new(0, 2, 0), Vector3.new(0, -60, 0), rp)
+    local hip = g0 and math.clamp(hrp.Position.Y - g0.Position.Y, 1.5, 6) or 3
     while alive() and av.Parent do
         if tripCancel then error("cancelado") end
         local dt = RunService.Heartbeat:Wait()
@@ -2224,6 +2246,9 @@ local function moveAv(av, hrp, target, speedFn, onStep)
         local dir = d.Unit
         local spd = speedFn()
         local np = pos + dir * math.min(dist, spd * dt)
+        -- acompanha o chao (sobe/desce rampas, nunca sai voando nem afunda)
+        local hit = workspace:Raycast(Vector3.new(np.X, pos.Y + 6, np.Z), Vector3.new(0, -60, 0), rp)
+        if hit then np = Vector3.new(np.X, hit.Position.Y + hip, np.Z) end
         if spd >= 2000 then GK.bolt(pos, np) end
         -- pernas acompanham a velocidade (sem parecer que desliza)
         tick0 = tick0 + dt
@@ -2236,6 +2261,23 @@ local function moveAv(av, hrp, target, speedFn, onStep)
     end
 end
 
+-- as areas ficam num corredor reto (eixo X, Z ~ -367); as bases ficam antes dele.
+-- Em vez de cortar caminho por cima de muros/void, entra no corredor, anda por ele e sai no destino.
+local LANE_Z, LANE_X0 = -367, 560
+local function lanePoints(from, to)
+    local pts = {}
+    local field = function(p) return p.X > LANE_X0 - 20 end
+    if field(from) or field(to) then
+        local function lane(p) return Vector3.new(math.max(p.X, LANE_X0), p.Y, LANE_Z) end
+        if math.abs(from.Z - LANE_Z) > 45 or not field(from) then table.insert(pts, lane(from)) end
+        if math.abs(to.Z - LANE_Z) > 45 or not field(to) then table.insert(pts, lane(to)) end
+    end
+    table.insert(pts, to)
+    return pts
+end
+local function routeAv(av, hrp, target, speedFn, onStep)
+    for _, pt in ipairs(lanePoints(hrp.Position, target)) do moveAv(av, hrp, pt, speedFn, onStep) end
+end
 -- monstro anda levando o avatar sentado nas costas
 local function rideTo(ms, hrp, groundY, target, speedFn)
     local cur = ms.ridePos
@@ -2469,7 +2511,7 @@ tripSteal = function()
         avPlay(hum, "run")
         local toEgg = flat(eggPos - hrp.Position)
         local stop = eggPos - (toEgg.Magnitude > 0 and toEgg.Unit * 3 or Vector3.zero)
-        moveAv(av, hrp, stop, avSpeed)
+        routeAv(av, hrp, stop, avSpeed)
         hrp.CFrame = CFrame.lookAt(hrp.Position, Vector3.new(eggPos.X, hrp.Position.Y, eggPos.Z))
 
         -- 2) pega
@@ -2511,7 +2553,7 @@ tripSteal = function()
         avPlay(hum, "run")
         -- animacao de carregar ovo do proprio jogo; se nao carregar, fica com os bracos esticados
         if GK.anim(av, GK.ANIM_CARRY, 1, Enum.AnimationPriority.Movement) and stopArms then stopArms(); stopArms = nil end
-        moveAv(av, hrp, deliver, avSpeed, carryStep)
+        routeAv(av, hrp, deliver, avSpeed, carryStep)
 
         -- 4) entrega: leva o ovo ate o lugar dele no cercado e planta ali
         cs.carried = true
@@ -2552,7 +2594,7 @@ tripSteal = function()
         if src then
             if simPopup then simPopup("🐉 Voltando pra pegar o pai: " .. src.Name) end
             avPlay(hum, "run")
-            moveAv(av, hrp, eggPos, avSpeed)
+            routeAv(av, hrp, eggPos, avSpeed)
             local mon = src:Clone()
             prep(mon); mon.Name = "Visual_" .. src.Name; mon.Parent = folder
             local ms = {model = mon, phase = math.random() * 10, nextGoal = 0, petName = src.Name}
@@ -2572,7 +2614,9 @@ tripSteal = function()
             table.insert(spawned, ms)
             layout()
             local target = ms.home and ms.home.Position or deliver
-            rideTo(ms, hrp, groundNest, target, function() return avSpeed() * 1.3 end)
+            for _, pt in ipairs(lanePoints(Vector3.new(ms.ridePos.X, groundNest, ms.ridePos.Z), target)) do
+                rideTo(ms, hrp, groundNest, pt, function() return avSpeed() * 1.3 end)
+            end
 
             -- 6) desce do monstro: ele fica no lugar dele gerando dinheiro (3x)
             if ms.home then
@@ -2588,7 +2632,7 @@ tripSteal = function()
 
         -- 7) volta pro personagem real
         avPlay(hum, "run")
-        moveAv(av, hrp, startCF.Position, avSpeed)
+        routeAv(av, hrp, startCF.Position, avSpeed)
     end)
 
     if stopArms then pcall(stopArms) end
@@ -3242,7 +3286,7 @@ end
 local function buildHub()
 local TS  = game:GetService("TweenService")
 local UIS = game:GetService("UserInputService")
-local VERSION = "v37"
+local VERSION = "v38"
 local pickResp
 
 if getgenv then
