@@ -15,13 +15,14 @@ local function alive() return not getgenv or getgenv().ModVipVisualSession == SE
 
 local folder = workspace:FindFirstChild("ModVipVisuals") or Instance.new("Folder")
 folder.Name = "ModVipVisuals"; folder.Parent = workspace
+local hadClone = folder:FindFirstChild("VisualAvatar") ~= nil
 folder:ClearAllChildren()
--- se o script foi aberto de novo no meio do Correr Flash / skin: solta e mostra o personagem real
+-- se o script foi aberto de novo no meio do Correr Flash / roubo / skin: solta e mostra o personagem real
 pcall(function()
     local ch = LP.Character
     if not ch then return end
     local hrp = ch:FindFirstChild("HumanoidRootPart")
-    if hrp and hrp.Anchored then hrp.Anchored = false end
+    if hadClone and hrp and hrp.Anchored then hrp.Anchored = false end
     for _, d in ipairs(ch:GetDescendants()) do
         if d:IsA("BasePart") or d:IsA("Decal") then d.LocalTransparencyModifier = 0
         elseif d:IsA("Trail") and d:GetAttribute("MV_WasOn") then d.Enabled = true; d:SetAttribute("MV_WasOn", nil) end
@@ -654,17 +655,23 @@ end)
 -- As suas originais ficam invisiveis SO na sua tela.
 local HIDE_ATTR = "MV_OrigT"
 
--- restaura o que versoes antigas esconderam
-for _, d in ipairs(workspace:GetDescendants()) do
-    local t = d:GetAttribute(HIDE_ATTR)
-    if t ~= nil then
-        pcall(function()
-            if d:IsA("BasePart") or d:IsA("Decal") or d:IsA("Texture") then d.Transparency = t
-            elseif d:IsA("LayerCollector") then d.Enabled = t end
-            d:SetAttribute(HIDE_ATTR, nil)
-        end)
+local HIDE_COL = "MV_OrigC"
+-- restaura o que versoes antigas esconderam (aos poucos, sem travar)
+task.spawn(function()
+    for i, d in ipairs(workspace:GetDescendants()) do
+        local t = d:GetAttribute(HIDE_ATTR)
+        if t ~= nil then
+            pcall(function()
+                if d:IsA("BasePart") or d:IsA("Decal") or d:IsA("Texture") then d.Transparency = t
+                elseif d:IsA("LayerCollector") then d.Enabled = t end
+                d:SetAttribute(HIDE_ATTR, nil)
+            end)
+        end
+        local c = d:GetAttribute(HIDE_COL)
+        if c ~= nil then pcall(function() d.CanCollide = c; d:SetAttribute(HIDE_COL, nil) end) end
+        if i % 4000 == 0 then task.wait() end
     end
-end
+end)
 
 local function hideModel(m)
     for _, d in ipairs(m:GetDescendants()) do
@@ -672,7 +679,10 @@ local function hideModel(m)
             if d:IsA("BasePart") or d:IsA("Decal") or d:IsA("Texture") then
                 if d:GetAttribute(HIDE_ATTR) == nil then d:SetAttribute(HIDE_ATTR, d.Transparency) end
                 d.Transparency = 1
-                if d:IsA("BasePart") then d.CanCollide = false end
+                if d:IsA("BasePart") then
+                    if d:GetAttribute(HIDE_COL) == nil then d:SetAttribute(HIDE_COL, d.CanCollide) end
+                    d.CanCollide = false
+                end
             elseif d:IsA("SurfaceGui") or d:IsA("BillboardGui") then
                 if d:GetAttribute(HIDE_ATTR) == nil then d:SetAttribute(HIDE_ATTR, d.Enabled) end
                 d.Enabled = false
@@ -690,6 +700,8 @@ local function showModel(m)
                 d:SetAttribute(HIDE_ATTR, nil)
             end)
         end
+        local c = d:GetAttribute(HIDE_COL)
+        if c ~= nil then pcall(function() d.CanCollide = c; d:SetAttribute(HIDE_COL, nil) end) end
     end
 end
 
@@ -982,7 +994,14 @@ pcall(function()
     local N = RS.Packages.Networking
     N["RE/EggWorld/FieldEggShifted"].OnClientEvent:Connect(onEggData)
     N["RE/EggWorld/FieldEggBatchShifted"].OnClientEvent:Connect(function(l)
-        if type(l) == "table" then for _, d in pairs(l) do onEggData(d) end end
+        if type(l) ~= "table" then return end
+        for _, d in pairs(l.UpdatedRecords or l) do onEggData(d) end
+        if type(l.RemovedUids) == "table" then
+            for _, u in pairs(l.RemovedUids) do eggCat[u] = nil end
+        end
+    end)
+    N["RE/EggWorld/FieldEggGone"].OnClientEvent:Connect(function(u)
+        if type(u) == "string" then eggCat[u] = nil end
     end)
 end)
 task.spawn(function()
@@ -1000,7 +1019,7 @@ end)
 -- Gravacao do jogo: cada pet real tem a placa "Data" (DisplayName, PerSecond "$4.6B/s", Odds = raridade).
 -- Copiamos essa placa (mesmo visual) e aprendemos renda/raridade de cada pet. Fica salvo em arquivo.
 GK = {lite = game:GetService("UserInputService").TouchEnabled and not game:GetService("UserInputService").KeyboardEnabled,
-    info = {}, grad = {}, file = "modvip_pet_learn.json", hatchMode = "Rápido", gameFx = true, speedMode = "Flash", treadBonus = 300000, flashChar = true, runSpeed = 300, renderCache = {}, renderPure = {}}
+    info = {}, grad = {}, file = "modvip_pet_learn.json", hatchMode = "Rápido", gameFx = true, speedMode = "Rápido", treadBonus = 300000, flashChar = true, runSpeed = 300, renderCache = {}, renderPure = {}}
 -- "assinatura" do esqueleto: se o modelo nao tem os mesmos ossos/juntas, a animacao do jogo fica toda errada nele
 function GK.petSource(name)
     if GK.renderCache[name] then return GK.renderCache[name] end
@@ -1929,8 +1948,12 @@ local function chocar(s, cat)
     if idx then table.remove(spawned, idx) end
     s.model:Destroy()
     local am = RS:FindFirstChild("AssetModels"); if not am then return end
-    local src = cat and am:FindFirstChild(cat)
-    if not src then local all = am:GetChildren(); src = all[math.random(#all)] end
+    local src = cat and GK.petSource(cat)
+    if not src then
+        local all = {}
+        for _, m in ipairs(am:GetChildren()) do if m:IsA("Model") then table.insert(all, m) end end
+        src = all[math.random(#all)]
+    end
     local ok, ps = spawnModel(src, src.Name)
     if ok and ps then
         sim.hatched = sim.hatched + 1
@@ -2070,8 +2093,12 @@ task.spawn(function()
         G.MV_OnTread = onIt
         if onIt then
             local gain = G.MV_TreadRate or treadGain(nil)
-            sim.speed = sim.speed + gain * GK.speedMult()
-            if simPopup and rewriteCount == 0 then simPopup("+" .. fmtMoney(gain) .. " ⚡ Velocidade", true) end
+            sim.speed = sim.speed + gain
+            -- aviso so de vez em quando (antes saia 1 por segundo)
+            if simPopup and rewriteCount == 0 and tick() - (GK.lastSpeedPop or 0) > 10 then
+                GK.lastSpeedPop = tick()
+                simPopup("+" .. fmtMoney(gain) .. " ⚡ Velocidade", true)
+            end
         end
     end
 end)
@@ -2169,6 +2196,10 @@ end
 local function avSpeed()
     local base = math.clamp(1600 + (sim.speed or 0) * 2, 1600, 20000)
     local m = GK.speedMode
+    -- velocidades pra VER a corrida (studs/s; o seu personagem normal anda ~80)
+    if m == "Normal" then return 90 end
+    if m == "Rápido" then return 260 end
+    if m == "Muito rápido" then return 700 end
     if m == "Flash" then return math.max(15000, base * 5) end
     if m == "Super Flash" then return math.max(60000, base * 15) end
     if m == "Instantâneo" then return 2e6 end
@@ -2181,6 +2212,8 @@ local function flat(v) return Vector3.new(v.X, 0, v.Z) end
 local function moveAv(av, hrp, target, speedFn, onStep)
     local y = hrp.Position.Y
     target = Vector3.new(target.X, y, target.Z)
+    local animator = av:FindFirstChildWhichIsA("Animator", true)
+    local tick0 = 0
     while alive() and av.Parent do
         if tripCancel then error("cancelado") end
         local dt = RunService.Heartbeat:Wait()
@@ -2189,8 +2222,15 @@ local function moveAv(av, hrp, target, speedFn, onStep)
         local dist = d.Magnitude
         if dist < 1 then break end
         local dir = d.Unit
-        local np = pos + dir * math.min(dist, speedFn() * dt)
-        if GK.speedMode ~= "Esteira" then GK.bolt(pos, np) end
+        local spd = speedFn()
+        local np = pos + dir * math.min(dist, spd * dt)
+        if spd >= 2000 then GK.bolt(pos, np) end
+        -- pernas acompanham a velocidade (sem parecer que desliza)
+        tick0 = tick0 + dt
+        if animator and tick0 > 0.2 then
+            tick0 = 0
+            for _, tr in ipairs(animator:GetPlayingAnimationTracks()) do tr:AdjustSpeed(math.clamp(spd / 45, 1, 3.5)) end
+        end
         hrp.CFrame = CFrame.lookAt(np, np + dir)
         if onStep then onStep(hrp.CFrame) end
     end
@@ -2207,8 +2247,9 @@ local function rideTo(ms, hrp, groundY, target, speedFn)
         if dist < 1 then break end
         local dir = d.Unit
         local before = cur
-        cur = cur + dir * math.min(dist, speedFn() * dt)
-        if GK.speedMode ~= "Esteira" then GK.bolt(Vector3.new(before.X, groundY + 2, before.Z), Vector3.new(cur.X, groundY + 2, cur.Z)) end
+        local rspd = speedFn()
+        cur = cur + dir * math.min(dist, rspd * dt)
+        if rspd >= 2000 then GK.bolt(Vector3.new(before.X, groundY + 2, before.Z), Vector3.new(cur.X, groundY + 2, cur.Z)) end
         local rot = CFrame.lookAt(Vector3.zero, dir)
         local center = Vector3.new(cur.X, groundY + ms.size.Y / 2, cur.Z)
         ms.model:PivotTo(CFrame.new(center) * rot * ms.centerToPivot)
@@ -2305,7 +2346,7 @@ local function startRunFx(av, hrp, speedFn)
         local hue = 0
         while on and av.Parent do
             local spd = speedFn()
-            Camera.FieldOfView = baseFov + math.clamp(15 + (spd - 1600) / 600, 15, 35)
+            Camera.FieldOfView = baseFov + math.clamp((spd - 150) / 60, 0, 35)
             if spd > 2500 then
                 hue = (hue + 0.08) % 1
                 local col = Color3.fromHSV(hue, 0.8, 1)
@@ -2413,6 +2454,7 @@ tripSteal = function()
     if not av then tripBusy = false return end
     local startCF = realRoot.CFrame
     hrp.CFrame = startCF
+    realRoot.Anchored = true
     local hiding = true
     task.spawn(function() while hiding do setRealHidden(true) task.wait(0.4) end end)
     Camera.CameraSubject = hum
@@ -2556,6 +2598,7 @@ tripSteal = function()
     end
     pcall(stopFx)
     hiding = false
+    pcall(function() realRoot.Anchored = false end)
     setRealHidden(false)
     Camera.CameraSubject = realHum
     if av then av:Destroy() end
@@ -3199,7 +3242,7 @@ end
 local function buildHub()
 local TS  = game:GetService("TweenService")
 local UIS = game:GetService("UserInputService")
-local VERSION = "v35"
+local VERSION = "v37"
 local pickResp
 
 if getgenv then
@@ -3960,7 +4003,7 @@ task.spawn(function()
 end)
 toggle(pSteal, "⚡ Efeito Flash no meu personagem", function() return GK.flashChar end, function(v) GK.flashChar = v end)
 cycle(pSteal, "⚡ Velocidade do roubo", function() return GK.speedMode end, function()
-    local modes = {"Esteira", "Flash", "Super Flash", "Instantâneo"}
+    local modes = {"Normal", "Rápido", "Muito rápido", "Esteira", "Flash", "Super Flash", "Instantâneo"}
     local i = table.find(modes, GK.speedMode) or 1
     GK.speedMode = modes[i % #modes + 1]
 end)
