@@ -1991,6 +1991,33 @@ function GK.fallbackEgg(area)
     end
     return GK.eggTpl
 end
+-- ovo roubado SOME do mapa e continua sumido: o jogo mexe na transparencia dos ovos (perto/longe),
+-- entao usamos o LocalTransparencyModifier (o jogo nao mexe nele) e desligamos brilhos/particulas/placas
+GK.stolen = setmetatable({}, {__mode = "k"})
+local function vanish(m)
+    for _, d in ipairs(m:GetDescendants()) do
+        if d:IsA("BasePart") or d:IsA("Decal") or d:IsA("Texture") then
+            d.LocalTransparencyModifier = 1
+        elseif d:IsA("ParticleEmitter") or d:IsA("Beam") or d:IsA("Trail") or d:IsA("Light")
+            or d:IsA("Highlight") or d:IsA("BillboardGui") or d:IsA("SurfaceGui") or d:IsA("Fire") or d:IsA("Sparkles") or d:IsA("Smoke") then
+            pcall(function() d.Enabled = false end)
+        end
+    end
+end
+function GK.hideStolen(m)
+    if not m then return end
+    GK.stolen[m] = true
+    pcall(hideModel, m)
+    pcall(vanish, m)
+end
+task.spawn(function()
+    while task.wait(0.4) do
+        if not alive() then break end
+        for m in pairs(GK.stolen) do
+            if m.Parent then pcall(vanish, m) else GK.stolen[m] = nil end
+        end
+    end
+end)
 function GK.redeem(cat, pos)
     if not GK.gameFx or not cat or not pos then return end
     local e = GK.info[cat] or {}
@@ -2052,7 +2079,7 @@ local function simStealOne()
     if not e then if simPopup then simPopup("Sem ovos dessa area no mapa") end return end
     local wantCat = chosenPet or (e.info and e.info.cat)
     local c = cloneVisual(eggModelFor(wantCat) or e.m); if not c then return end
-    hideModel(e.m)
+    GK.hideStolen(e.m)
     for _, p in ipairs(c:GetDescendants()) do
         if p:IsA("BasePart") and (p.Name == "Hitbox" or p.Name == "CustomBoundingBox") then p.Transparency = 1 end
     end
@@ -2602,7 +2629,7 @@ tripSteal = function()
         carry.Name = "Visual_SimEgg"; carry.Parent = folder
         local cs = {model = carry, phase = 0, nextGoal = 0, still = true, animated = true, isEgg = true, k = 1}
         measure(cs); cs.origFoot = math.max(0.5, cs.size.X)
-        if egg then hideModel(egg) end
+        if egg then GK.hideStolen(egg) end
         if selectHL then selectHL:Destroy(); selectHL = nil end
         selectedEgg = nil
         stopArms = holdArms(av)
@@ -3396,7 +3423,7 @@ end
 local function buildHub()
 local TS  = game:GetService("TweenService")
 local UIS = game:GetService("UserInputService")
-local VERSION = "v42"
+local VERSION = "v43"
 local pickResp
 
 if getgenv then
