@@ -1114,6 +1114,188 @@ pcall(function()
         if type(d) == "table" then GK.info = d end
     end
 end)
+-- o que ja foi aprendido jogando (vem junto no script: celular e PC comecam sabendo)
+GK.BUILTIN = {
+    ["67"] = {r = "Secret", i = 791000000},
+    ["Cerberus"] = {r = "Secret", i = 6400000, a = "rbxassetid://128670391346328"},
+    ["Tiger"] = {r = "Mythic", i = 59000, a = "rbxassetid://114561164594465"},
+    ["Three Headed Chicken"] = {r = "Cosmic", i = 154000000, a = "rbxassetid://116774293737020"},
+    ["Ankylosaurus"] = {r = "Mythic", i = 410000, a = "rbxassetid://71910623791893"},
+    ["Tob Tobi Tob Tob"] = {r = "Epic", i = 265, a = "rbxassetid://112172793244677"},
+    ["Toxic Hedgehog"] = {r = "Secret", i = 1400000000, a = "rbxassetid://90281674298541"},
+    ["Dunkleosteus"] = {r = "Secret", i = 280000000},
+    ["Unicorn"] = {r = "Divine", i = 765000000, a = "rbxassetid://126479121498082"},
+    ["Sharkodile"] = {r = "Secret", i = 767000000, a = "rbxassetid://120948009576895"},
+    ["Gorilla"] = {r = "Mythic", i = 4000, a = "rbxassetid://75984141998333"},
+    ["Yeti"] = {r = "Secret", i = 4400000, a = "rbxassetid://82636665685816"},
+    ["Royal Skywhale"] = {r = "Divine", i = 43000000000, a = "rbxassetid://72475549070227"},
+    ["Ice Dragon"] = {r = "Eternal", i = 54000000, a = "rbxassetid://89972004562188"},
+    ["Wheel Hamster"] = {r = "Mythic", i = 1700000, a = "rbxassetid://80887780909410"},
+    ["Whale Shark"] = {r = "Cosmic", i = 723000, a = "rbxassetid://96079428169602"},
+    ["Imp"] = {r = "Cosmic", i = 11000000, a = "rbxassetid://99392172664963", w = "rbxassetid://72516808870539"},
+    ["Pegasus"] = {r = "Eternal", i = 964000000, a = "rbxassetid://115495639401411"},
+    ["Eternal Lunar Dragon"] = {r = "Eternal", i = 186000000, a = "rbxassetid://118874129580676", w = "rbxassetid://139537878984191"},
+    ["World Burner"] = {r = "Divine", i = 11000000000, a = "rbxassetid://105908120568207"},
+    ["Chillin Chilli"] = {r = "Mythic", i = 687000, a = "rbxassetid://113963889057275"},
+    ["Oni Tiger"] = {r = "Eternal", i = 555000000, a = "rbxassetid://108535480817318", w = "rbxassetid://75608548920054"},
+    ["Centaur"] = {r = "Secret", i = 292000000, a = "rbxassetid://103579027390419"},
+    ["Lamb"] = {r = "Mythic", i = 10000000, a = "rbxassetid://111816188642783", w = "rbxassetid://79560565269439"},
+    ["Stag"] = {r = "Secret", i = 109000000, a = "rbxassetid://97594016374994"},
+    ["Tralaledon"] = {r = "Secret", i = 23000000, a = "rbxassetid://76232355786894"},
+    ["Camel"] = {r = "Rare", i = 209, a = "rbxassetid://132038053239618"},
+    ["Snowy Owl"] = {r = "Cosmic", i = 6600000, a = "rbxassetid://89629292005887", w = "rbxassetid://131028384806119"},
+    ["Abyss Overlord"] = {r = "Secret", i = 509000000, a = "rbxassetid://136140636644582"},
+    ["Toucax"] = {r = "Cosmic", i = 22000000, a = "rbxassetid://77333887843784"},
+    ["Bear"] = {r = "Epic", i = 3100, a = "rbxassetid://117105848139359"},
+    ["Sand Spider"] = {r = "Mythic", i = 31000, a = "rbxassetid://105987892350746"},
+    ["Bronto"] = {r = "Cosmic", i = 1100000, a = "rbxassetid://99676847051723", w = "rbxassetid://93614636566946"},
+    ["Shark"] = {r = "Secret", i = 16000, a = "rbxassetid://90009532577653", w = "rbxassetid://120443209157050"},
+    ["Dog"] = {r = "Common", i = 2, a = "rbxassetid://117866633124975", w = "rbxassetid://85471228397160"},
+    ["Amethyst Runebear"] = {r = "Secret", i = 1200000000, a = "rbxassetid://112222001873242"},
+    ["Crocodile"] = {r = "Epic", i = 913, a = "rbxassetid://90280232778597"},
+    ["Aetheron"] = {r = "Divine", i = 33000000000, a = "rbxassetid://97205108103704"},
+    ["Moth"] = {r = "Cosmic", i = 14000000, a = "rbxassetid://113695479057312", w = "rbxassetid://95246247805951"},
+    ["Sabertooth Tiger"] = {r = "Mythic", i = 69000, a = "rbxassetid://138808362599771"},
+    ["Radcoon"] = {r = "Cosmic", i = 2100000, a = "rbxassetid://81430233906949"},
+    ["Toxic Rat"] = {r = "Mythic", i = 648000, a = "rbxassetid://94330797297816"},
+    ["Peacock"] = {r = "Cosmic", i = 25000000, a = "rbxassetid://102772617893534", w = "rbxassetid://97662813776740"},
+    ["Dragon"] = {r = "Eternal", i = 51000000, a = "rbxassetid://89972004562188", w = "rbxassetid://89972004562188"},
+    ["Frog"] = {r = "Common", i = 36, a = "rbxassetid://117840973653687"},
+    ["Kraken"] = {r = "Secret", i = 11000000, a = "rbxassetid://77550298467205"},
+    ["Stacked Turtle"] = {r = "Cosmic", i = 10000000, a = "rbxassetid://126570430345588"},
+    ["Orca"] = {r = "Mythic", i = 2400000, a = "rbxassetid://127927181298183"},
+    ["Burrowing Owl"] = {r = "Rare", i = 855, a = "rbxassetid://89419902709935"},
+    ["RazorFang"] = {r = "Secret", i = 304000000, a = "rbxassetid://103039030085527", w = "rbxassetid://103039030085527"},
+    ["El Maja"] = {r = "Eternal", i = 122000000, a = "rbxassetid://132181117287223"},
+    ["Demon Hound"] = {r = "Cosmic", i = 23000000, a = "rbxassetid://71097341870152"},
+    ["La Vacca Saturno Saturnita"] = {r = "Cosmic", i = 1600000, a = "rbxassetid://128408499556120"},
+    ["Spider"] = {r = "Mythic", i = 77000, a = "rbxassetid://117459506499807"},
+    ["ArchAngel"] = {r = "Divine", i = 31000000000, a = "rbxassetid://86353056746586"},
+    ["Koi"] = {r = "Cosmic", i = 9600000, a = "rbxassetid://88607416819948", w = "rbxassetid://85297314199675"},
+    ["Mosasaurus"] = {r = "Eternal", i = 141000000, a = "rbxassetid://130987511514994"},
+    ["Eyeball Crab"] = {r = "Secret", i = 2700000000, a = "rbxassetid://136735042783816"},
+    ["Jellyfish"] = {r = "Secret", i = 179000000, a = "rbxassetid://138191306409960", w = "rbxassetid://86698796056796"},
+    ["Kitsune"] = {r = "Divine", i = 1500000000, a = "rbxassetid://120302895222735"},
+    ["Flaming Bull"] = {r = "Legendary", i = 9500, a = "rbxassetid://102660603214468"},
+    ["Skeleton Horse"] = {r = "Eternal", i = 1000000000, a = "rbxassetid://131965507609560"},
+    ["Triceratops"] = {r = "Cosmic", i = 1100000, a = "rbxassetid://87496654880154"},
+    ["Lava Iguana"] = {r = "Legendary", i = 10000, a = "rbxassetid://78797664606337"},
+    ["Polar Bear"] = {r = "Legendary", i = 15000, a = "rbxassetid://75033907531372"},
+    ["Catfish"] = {r = "Uncommon", i = 11, a = "rbxassetid://77531242643307"},
+    ["Mammoth"] = {r = "Cosmic", i = 338000, a = "rbxassetid://71312716272835", w = "rbxassetid://71312716272835"},
+}
+GK.BUILTIN_AREAS = {
+    ["Toro"] = "Light Dark",
+    ["Tiger"] = "Jungle",
+    ["Galaxy Gecko"] = "Cosmic",
+    ["Ankylosaurus"] = "Prehistoric",
+    ["Dream Axolotl"] = "Lake",
+    ["Tob Tobi Tob Tob"] = "Desert",
+    ["Mantis"] = "Titan Temple",
+    ["Enchanted Bluejay"] = "Enchanted Forest",
+    ["Mire Fox"] = "Forest",
+    ["Crab"] = "Titan Temple",
+    ["Toucan"] = "Jungle",
+    ["Chimpanzee"] = "Jungle",
+    ["Gorilla"] = "Jungle",
+    ["Triceratops"] = "Prehistoric",
+    ["Rattlesnake"] = "Desert",
+    ["Whale Shark"] = "Abyss Ocean",
+    ["Kaiju Spider"] = "Titan Temple",
+    ["Imp"] = "Light Dark",
+    ["Chicken"] = "Forest",
+    ["Lava frog"] = "Volcano",
+    ["Prism Gecko"] = "Enchanted Forest",
+    ["Chillin Chilli"] = "Volcano",
+    ["Raccoon"] = "Forest",
+    ["Swordfish"] = "Abyss Ocean",
+    ["Irihorus"] = "Desert",
+    ["Trulimero Trulicina"] = "Lake",
+    ["Lamb"] = "Light Dark",
+    ["Jellyfish"] = "Light Dark",
+    ["Tralaledon"] = "Prehistoric",
+    ["Cosmic Beetle Blue"] = "Enchanted Forest",
+    ["Kitsune"] = "Cherry Blossom",
+    ["Finned Thresher"] = "Abyss Ocean",
+    ["Basilisk"] = "Lake",
+    ["Dodo"] = "Prehistoric",
+    ["Camel"] = "Desert",
+    ["Flame Sprite"] = "Light Dark",
+    ["Salamander"] = "Cherry Blossom",
+    ["Alien Skeleton Boss"] = "Cosmic",
+    ["Polar Bear"] = "Snow",
+    ["Dark Gargoyle"] = "Light Dark",
+    ["RazorFang"] = "Light Dark",
+    ["Snowy Owl"] = "Cherry Blossom",
+    ["Cyclops Gorilla"] = "Cosmic",
+    ["Bear"] = "Forest",
+    ["Sand Spider"] = "Desert",
+    ["Shark"] = "Titan Temple",
+    ["Spirit Hare"] = "Enchanted Forest",
+    ["Bronto"] = "Prehistoric",
+    ["Red Panda"] = "Cherry Blossom",
+    ["Dog"] = "Forest",
+    ["Colossal Mammoth"] = "Snow",
+    ["Crocodile"] = "Jungle",
+    ["Penguin"] = "Snow",
+    ["Orangutini Ananassini"] = "Jungle",
+    ["Koi"] = "Cherry Blossom",
+    ["Moth"] = "Light Dark",
+    ["Blade Head"] = "Titan Temple",
+    ["Centapede"] = "Cosmic",
+    ["Spirit Panda"] = "Enchanted Forest",
+    ["Rhino"] = "Titan Temple",
+    ["Pterodactyl"] = "Prehistoric",
+    ["Turtle"] = "Lake",
+    ["Peacock"] = "Light Dark",
+    ["Orca"] = "Abyss Ocean",
+    ["Flaming Bull"] = "Volcano",
+    ["Duckling"] = "Lake",
+    ["Sabertooth Tiger"] = "Snow",
+    ["TyrannosaurusRex"] = "Prehistoric",
+    ["Demon Hound"] = "Light Dark",
+    ["Burrowing Owl"] = "Forest",
+    ["Cave Dragon"] = "Cosmic",
+    ["Spider"] = "Jungle",
+    ["Parrotfish"] = "Abyss Ocean",
+    ["Dove"] = "Light Dark",
+    ["La Vacca Saturno Saturnita"] = "Cosmic",
+    ["DesertLark"] = "Forest",
+    ["Walrus"] = "Snow",
+    ["Frog"] = "Lake",
+    ["Swan"] = "Lake",
+    ["Crane"] = "Cherry Blossom",
+    ["Alabaster Whale"] = "Abyss Ocean",
+    ["Catfish"] = "Lake",
+    ["DeathstalkerScorpion"] = "Desert",
+    ["Ash Gecko"] = "Volcano",
+    ["Lava Iguana"] = "Volcano",
+    ["Jerboa"] = "Desert",
+    ["FennecFox"] = "Desert",
+    ["Mammoth"] = "Snow",
+}
+GK.BUILTIN_AREA_POS = {
+    ["Jungle"] = {1188.9, 67.7, -409.5},
+    ["Cherry Blossom"] = {4027.8, 67.7, -397},
+    ["Desert"] = {949.7, 67.6, -324.2},
+    ["Prehistoric"] = {2813.5, 67.7, -398.3},
+    ["Forest"] = {597.1, 67.6, -328.4},
+    ["Titan Temple"] = {4797.7, 67.9, -328.7},
+    ["Enchanted Forest"] = {6697.2, 67.9, -349.9},
+    ["Abyss Ocean"] = {2281.5, 67.4, -327.1},
+    ["Cosmic"] = {3391.9, 67.6, -324.9},
+    ["Lake"] = {743.7, 67.6, -408.9},
+    ["Volcano"] = {1879.1, 67.4, -397.9},
+    ["Light Dark"] = {5662.7, 67.9, -328.7},
+    ["Snow"] = {1492.3, 68.1, -314.7},
+}
+for name, b in pairs(GK.BUILTIN) do
+    local e = GK.info[name] or {}
+    e.rarity = e.rarity or b.r
+    e.income = e.income or b.i
+    if b.a and not (e.anims and (e.anims.idle or e.anims.walk)) then e.anims = {idle = b.a, walk = b.w} end
+    GK.info[name] = e
+end
 GK.MULT = {K = 1e3, M = 1e6, B = 1e9, T = 1e12, Qa = 1e15, Qi = 1e18, Sx = 1e21}
 GK.COLORS = {
     Common = Color3.fromRGB(190, 190, 190), Uncommon = Color3.fromRGB(90, 220, 90), Rare = Color3.fromRGB(70, 150, 255),
@@ -1472,6 +1654,7 @@ pcall(function()
         if type(d) == "table" then areaPosMem = d end
     end
 end)
+for ar, v in pairs(GK.BUILTIN_AREA_POS) do if areaPosMem[ar] == nil then areaPosMem[ar] = v end end
 local AREA_MEM_FILE = "modvip_pet_areas.json"
 local areaMem = {}
 pcall(function()
@@ -1480,6 +1663,7 @@ pcall(function()
         if type(d) == "table" then areaMem = d end
     end
 end)
+for pet, ar in pairs(GK.BUILTIN_AREAS) do if areaMem[pet] == nil then areaMem[pet] = ar end end
 task.spawn(function()
     local last = ""
     while task.wait(15) do
@@ -2121,7 +2305,7 @@ task.spawn(function()
     while task.wait(4) do
         if not alive() then break end
         if simAuto then
-            if charMode and tripSteal then pcall(tripSteal) else pcall(simStealOne) end
+            if charMode and tripSteal then pcall(tripSteal, GK.autoKind or "egg") else pcall(simStealOne) end
         end
     end
 end)
@@ -2543,7 +2727,8 @@ local function handsPoint(av, hrp)
     return (hrp.CFrame * CFrame.new(0, 0.6, -2)).Position
 end
 
-tripSteal = function()
+tripSteal = function(kind)
+    kind = kind or "egg"    -- "egg" = so rouba o ovo | "pet" = so busca o pet montado
     if tripBusy then return end
     if GK.stopRun then GK.stopRun() end
     tripCancel = false
@@ -2608,8 +2793,9 @@ tripSteal = function()
     local rideMonster   -- se cancelar montado, some com ele
 
     local ok, err = pcall(function()
+        if kind ~= "pet" then
         -- 1) vai ate o ovo
-        if simPopup then simPopup("🏃 Indo roubar: " .. (cat or "Ovo") .. " em " .. areaTxt) end
+        if simPopup then simPopup("🏃 Indo roubar o ovo: " .. (cat or "Ovo") .. " em " .. areaTxt) end
         avPlay(hum, "run")
         local toEgg = flat(eggPos - hrp.Position)
         local stop = eggPos - (toEgg.Magnitude > 0 and toEgg.Unit * 3 or Vector3.zero)
@@ -2629,6 +2815,7 @@ tripSteal = function()
         carry.Name = "Visual_SimEgg"; carry.Parent = folder
         local cs = {model = carry, phase = 0, nextGoal = 0, still = true, animated = true, isEgg = true, k = 1}
         measure(cs); cs.origFoot = math.max(0.5, cs.size.X)
+        rescale(cs, scale)      -- ja nasce no tamanho escolhido (nao muda de tamanho depois)
         if egg then GK.hideStolen(egg) end
         if selectHL then selectHL:Destroy(); selectHL = nil end
         selectedEgg = nil
@@ -2684,8 +2871,10 @@ tripSteal = function()
         addTag(cs)
         task.spawn(chocar, cs, cat)
         task.wait(0.35)
+        end
 
-        -- 5) volta pro ninho e monta no monstro pai
+        if kind ~= "egg" then
+        -- 5) vai ate o ninho e monta no monstro pai
         local am = RS:FindFirstChild("AssetModels")
         local src = cat and GK.petSource(cat)
         if not src and am then
@@ -2694,7 +2883,7 @@ tripSteal = function()
             src = all[math.random(#all)]
         end
         if src then
-            if simPopup then simPopup("🐉 Voltando pra pegar o pai: " .. src.Name) end
+            if simPopup then simPopup("🐉 Indo buscar o " .. src.Name .. " em " .. areaTxt) end
             avPlay(hum, "run")
             routeAv(av, hrp, eggPos, avSpeed)
             local mon = src:Clone()
@@ -2730,6 +2919,7 @@ tripSteal = function()
             pcall(addTag, ms)
             local here = ms.home and ms.home.Position or target
             hrp.CFrame = CFrame.new(Vector3.new(here.X, startCF.Position.Y, here.Z) + frame.RightVector * (ms.size.X / 2 + 4))
+        end
         end
 
         -- 7) volta pro personagem real
@@ -3423,7 +3613,7 @@ end
 local function buildHub()
 local TS  = game:GetService("TweenService")
 local UIS = game:GetService("UserInputService")
-local VERSION = "v43"
+local VERSION = "v44"
 local pickResp
 
 if getgenv then
@@ -4159,20 +4349,43 @@ task.spawn(function()
     end
 end)
 
-section(pSteal, "Ação")
+section(pSteal, "Ação (um de cada vez)")
+local actBtns = row(pSteal, {
+    {"🥚 Roubar ovo", "main", function()
+        if simAuto then simAuto = false end
+        GK.autoKind = "egg"
+        pcall(tripSteal, "egg")
+    end},
+    {"🐉 Pegar pet", "main", function()
+        if simAuto then simAuto = false end
+        GK.autoKind = "pet"
+        pcall(tripSteal, "pet")
+    end},
+}, 50)
+for _, b in ipairs(actBtns) do
+    b.TextScaled = true; b.TextWrapped = true
+    local c = Instance.new("UITextSizeConstraint", b); c.MaxTextSize = 15; c.MinTextSize = 9
+end
+task.spawn(function()
+    local last = -1
+    while task.wait(0.3) do
+        if not alive() then break end
+        if chosenPet ~= last then
+            last = chosenPet
+            actBtns[1].Text = chosenPet and ("🥚 Roubar ovo de " .. chosenPet) or "🥚 Roubar ovo (do mapa)"
+            actBtns[2].Text = chosenPet and ("🐉 Pegar " .. chosenPet .. " (montado)") or "🐉 Pegar pet do ovo (montado)"
+        end
+    end
+end)
 row(pSteal, {
     {"🎯 Escolher ovo", "card", function() end},   -- ligado abaixo (janela)
-    {"🏃 ROUBAR", "main", function()
-        if simAuto then simAuto = false end
-        pcall(tripSteal)
-    end},
     {"⛔ Parar", "bad", function()
         tripCancel = true; simAuto = false
         simPopup("⛔ Viagem cancelada")
     end},
-}, 46)
+}, 40)
 section(pSteal, "Automático")
-local refreshAuto = toggle(pSteal, "🤖 Auto roubar (repete sozinho)", function() return simAuto end, function(v) simAuto = v end)
+local refreshAuto = toggle(pSteal, "🤖 Auto (repete o último: ovo ou pet)", function() return simAuto end, function(v) simAuto = v end)
 toggle(pSteal, "👤 Auto usa o personagem", function() return charMode end, function(v) charMode = v end)
 cycle(pSteal, "🌍 Área (sem pet escolhido)", function() return simArea end, function()
     local i = table.find(SIM_AREAS, simArea) or 1
