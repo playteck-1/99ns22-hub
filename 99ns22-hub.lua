@@ -2828,8 +2828,14 @@ tripSteal = function(kind)
         stopArms = holdArms(av)
         local function carryStep(cf)
             local c = handsPoint(av, hrp) + Vector3.new(0, 0.2, 0)
-            -- ovo grande: carrega em cima da cabeca, senao metade dele fica dentro do chao
-            if cs.size and cs.size.Y > 3 then c = hrp.Position + Vector3.new(0, 2.6 + cs.size.Y / 2, 0) end
+            -- nas maos, como no jogo; ovo grande vai um pouco pra frente (nao entra no corpo) e nunca abaixo do chao
+            if cs.size and cs.size.Y > 2 then
+                local look = Vector3.new(hrp.CFrame.LookVector.X, 0, hrp.CFrame.LookVector.Z)
+                if look.Magnitude > 0.01 then c = c + look.Unit * (cs.size.Z / 2 - 0.6) end
+                local gap = (hum.RigType == Enum.HumanoidRigType.R15) and (hum.HipHeight + hrp.Size.Y / 2) or 3
+                local minY = hrp.Position.Y - gap + cs.size.Y / 2 + 0.1
+                if c.Y < minY then c = Vector3.new(c.X, minY, c.Z) end
+            end
             carry:PivotTo(CFrame.new(c) * (cf - cf.Position) * cs.centerToPivot)
         end
         -- segue as maos todo frame (inclusive parado)
@@ -3126,7 +3132,7 @@ end)
 -- ===== 🏇 MONTARIA (atualizacao 8 "Mounts") - so na sua tela =====
 -- Uma copia sua monta no pet escolhido; voce controla com WASD/analogico.
 -- O personagem real fica parado e invisivel SO pra voce (pros outros voce esta parado).
-GK.mountSpeed = 90
+GK.mountSpeed = 0     -- 0 = mesma velocidade do seu personagem
 do
     local ride
     function GK.isMounted() return ride ~= nil end
@@ -3186,15 +3192,39 @@ do
         dust.Texture = "rbxasset://textures/particles/smoke_main.dds"; dust.Color = ColorSequence.new(Color3.fromRGB(200, 185, 160))
         dust.Rate = 0; dust.Speed = NumberRange.new(2, 5); dust.SpreadAngle = Vector2.new(60, 60)
         dust.Lifetime = NumberRange.new(0.5, 0.9); dust.Size = NumberSequence.new(1.2, 3); dust.Transparency = NumberSequence.new(0.5, 1)
+        -- acha as costas do pet: raio de cima pra baixo so nas pecas visiveis dele
+        pet:PivotTo(CFrame.new(Vector3.new(pos.X, floor + ms.size.Y / 2, pos.Z)) * CFrame.lookAt(Vector3.zero, look) * ms.centerToPivot)
+        local backY = ms.size.Y * 0.25
+        pcall(function()
+            local saved = {}
+            for _, d in ipairs(pet:GetDescendants()) do
+                if d:IsA("BasePart") then saved[d] = d.CanQuery; d.CanQuery = d.Transparency < 0.95 end
+            end
+            local ip = RaycastParams.new()
+            ip.FilterType = Enum.RaycastFilterType.Include
+            ip.FilterDescendantsInstances = {pet}
+            local c0 = Vector3.new(pos.X, floor + ms.size.Y / 2, pos.Z)
+            local best
+            for _, f in ipairs({0, -0.1, 0.1}) do
+                local o = c0 + look * (ms.size.Z * f) + Vector3.new(0, ms.size.Y, 0)
+                local h = workspace:Raycast(o, Vector3.new(0, -ms.size.Y * 2, 0), ip)
+                if h and (not best or h.Position.Y < best) then best = h.Position.Y end
+            end
+            for d, v in pairs(saved) do pcall(function() d.CanQuery = v end) end
+            if best then backY = best - c0.Y end
+        end)
+        -- altura do quadril sentado acima da sela
+        local seat = (hum.RigType == Enum.HumanoidRigType.R15) and (hrp.Size.Y * 0.5 + 0.35) or 1.5
         local moving, bobT = false, 0
         r.conn = RunService.Heartbeat:Connect(function(dt)
             if ride ~= r then return end
             if not alive() or not av.Parent or not pet.Parent or not rhum.Parent then GK.dismount() return end
+            local spd = GK.mountSpeed > 0 and GK.mountSpeed or (rhum.WalkSpeed > 0 and rhum.WalkSpeed or 16)
             local dir = Vector3.new(rhum.MoveDirection.X, 0, rhum.MoveDirection.Z)
             local mv = dir.Magnitude > 0.1
             if mv then
                 dir = dir.Unit
-                pos = pos + dir * GK.mountSpeed * dt
+                pos = pos + dir * spd * dt
                 look = look:Lerp(dir, math.min(1, dt * 8))
                 if look.Magnitude < 0.01 then look = dir end
                 look = look.Unit
@@ -3209,16 +3239,16 @@ do
                 end
                 dust.Rate = mv and (GK.lite and 12 or 30) or 0
             end
-            if mv and ms.trWalk then ms.trWalk:AdjustSpeed(math.clamp(GK.mountSpeed / 40, 1, 3)) end
+            if mv and ms.trWalk then ms.trWalk:AdjustSpeed(math.clamp(spd / 20, 0.8, 3)) end
             -- pulinho de galope se o pet nao tiver animacao
             bobT = bobT + dt
             local bob = (not animated and mv) and math.abs(math.sin(bobT * 10)) * 0.8 or 0
             local center = Vector3.new(pos.X, floor + ms.size.Y / 2 + bob, pos.Z)
             local rot = CFrame.lookAt(Vector3.zero, look)
             pet:PivotTo(CFrame.new(center) * rot * ms.centerToPivot)
-            hrp.CFrame = CFrame.new(center + Vector3.new(0, ms.size.Y / 2 + 1.6, 0)) * rot
+            hrp.CFrame = CFrame.new(center + Vector3.new(0, backY + seat, 0)) * rot
             dustA.CFrame = CFrame.new(Vector3.new(pos.X, floor + 0.5, pos.Z))
-            local target = r.fov + (mv and math.clamp((GK.mountSpeed - 60) / 20, 0, 20) or 0)
+            local target = r.fov + (mv and math.clamp((spd - 60) / 20, 0, 20) or 0)
             Camera.FieldOfView = Camera.FieldOfView + (target - Camera.FieldOfView) * math.min(1, dt * 5)
         end)
         return true
@@ -3750,7 +3780,7 @@ end
 local function buildHub()
 local TS  = game:GetService("TweenService")
 local UIS = game:GetService("UserInputService")
-local VERSION = "v47"
+local VERSION = "v48"
 local pickResp
 
 if getgenv then
@@ -4585,8 +4615,8 @@ do
             GK.dismount()
         end
     end)
-    cycle(pSteal, "🐎 Velocidade da montaria", function() return tostring(GK.mountSpeed) end, function()
-        local opts = {50, 90, 150, 300, 600}
+    cycle(pSteal, "🐎 Velocidade da montaria", function() return GK.mountSpeed > 0 and tostring(GK.mountSpeed) or "Igual a sua" end, function()
+        local opts = {0, 50, 90, 150, 300, 600}
         local i = table.find(opts, GK.mountSpeed) or 0
         GK.mountSpeed = opts[i % #opts + 1]
     end)
