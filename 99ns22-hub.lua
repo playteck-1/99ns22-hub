@@ -3133,6 +3133,7 @@ end)
 -- Uma copia sua monta no pet escolhido; voce controla com WASD/analogico.
 -- O personagem real fica parado e invisivel SO pra voce (pros outros voce esta parado).
 GK.mountSpeed = 0     -- 0 = mesma velocidade do seu personagem
+GK.mountUp, GK.mountBack = 0, 0   -- ajuste fino de onde voce senta (aba Roubo)
 do
     local ride
     function GK.isMounted() return ride ~= nil end
@@ -3192,29 +3193,36 @@ do
         dust.Texture = "rbxasset://textures/particles/smoke_main.dds"; dust.Color = ColorSequence.new(Color3.fromRGB(200, 185, 160))
         dust.Rate = 0; dust.Speed = NumberRange.new(2, 5); dust.SpreadAngle = Vector2.new(60, 60)
         dust.Lifetime = NumberRange.new(0.5, 0.9); dust.Size = NumberSequence.new(1.2, 3); dust.Transparency = NumberSequence.new(0.5, 1)
-        -- acha as costas do pet: raio de cima pra baixo so nas pecas visiveis dele
+        -- acha as costas do pet: o topo das pecas visiveis num ponto um pouco atras do meio
+        -- (pela geometria das pecas, sem raio: o raio errava e voce afundava)
         pet:PivotTo(CFrame.new(Vector3.new(pos.X, floor + ms.size.Y / 2, pos.Z)) * CFrame.lookAt(Vector3.zero, look) * ms.centerToPivot)
-        local backY = ms.size.Y * 0.25
+        local backZ = ms.size.Z * 0.15      -- quanto pra tras do meio voce senta
+        local backY = ms.size.Y * 0.4
         pcall(function()
-            local saved = {}
-            for _, d in ipairs(pet:GetDescendants()) do
-                if d:IsA("BasePart") then saved[d] = d.CanQuery; d.CanQuery = d.Transparency < 0.95 end
-            end
-            local ip = RaycastParams.new()
-            ip.FilterType = Enum.RaycastFilterType.Include
-            ip.FilterDescendantsInstances = {pet}
             local c0 = Vector3.new(pos.X, floor + ms.size.Y / 2, pos.Z)
+            local hide = {HumanoidRootPart = true, CenterCFrame = true, CENTER = true, Hitbox = true, CustomBoundingBox = true, RootPart = true}
             local best
-            for _, f in ipairs({0, -0.1, 0.1}) do
-                local o = c0 + look * (ms.size.Z * f) + Vector3.new(0, ms.size.Y, 0)
-                local h = workspace:Raycast(o, Vector3.new(0, -ms.size.Y * 2, 0), ip)
-                if h and (not best or h.Position.Y < best) then best = h.Position.Y end
+            for _, f in ipairs({1, 0.6, 1.4}) do
+                local pt = c0 - look * backZ * f
+                for _, d in ipairs(pet:GetDescendants()) do
+                    if d:IsA("BasePart") and d.Transparency < 0.95 and not hide[d.Name] then
+                        local cf, h = d.CFrame, d.Size / 2
+                        local ex = math.abs(cf.RightVector.X) * h.X + math.abs(cf.UpVector.X) * h.Y + math.abs(cf.LookVector.X) * h.Z
+                        local ey = math.abs(cf.RightVector.Y) * h.X + math.abs(cf.UpVector.Y) * h.Y + math.abs(cf.LookVector.Y) * h.Z
+                        local ez = math.abs(cf.RightVector.Z) * h.X + math.abs(cf.UpVector.Z) * h.Y + math.abs(cf.LookVector.Z) * h.Z
+                        local m = 0.85    -- miolo da peca (as bordas da caixa sao mais altas que o corpo de verdade)
+                        if math.abs(pt.X - cf.X) <= ex * m and math.abs(pt.Z - cf.Z) <= ez * m then
+                            local top = cf.Y + ey * 0.9
+                            if not best or top > best then best = top end
+                        end
+                    end
+                end
+                if best then break end
             end
-            for d, v in pairs(saved) do pcall(function() d.CanQuery = v end) end
-            if best then backY = best - c0.Y end
+            if best then backY = math.clamp(best - c0.Y, -ms.size.Y * 0.2, ms.size.Y * 0.5) end
         end)
         -- altura do quadril sentado acima da sela
-        local seat = (hum.RigType == Enum.HumanoidRigType.R15) and (hrp.Size.Y * 0.5 + 0.35) or 1.5
+        local seat = (hum.RigType == Enum.HumanoidRigType.R15) and (hrp.Size.Y * 0.5 + 0.6) or 1.7
         local moving, bobT = false, 0
         r.conn = RunService.Heartbeat:Connect(function(dt)
             if ride ~= r then return end
@@ -3246,7 +3254,7 @@ do
             local center = Vector3.new(pos.X, floor + ms.size.Y / 2 + bob, pos.Z)
             local rot = CFrame.lookAt(Vector3.zero, look)
             pet:PivotTo(CFrame.new(center) * rot * ms.centerToPivot)
-            hrp.CFrame = CFrame.new(center + Vector3.new(0, backY + seat, 0)) * rot
+            hrp.CFrame = CFrame.new(center + Vector3.new(0, backY + seat + GK.mountUp, 0) - look * (backZ + GK.mountBack)) * rot
             dustA.CFrame = CFrame.new(Vector3.new(pos.X, floor + 0.5, pos.Z))
             local target = r.fov + (mv and math.clamp((spd - 60) / 20, 0, 20) or 0)
             Camera.FieldOfView = Camera.FieldOfView + (target - Camera.FieldOfView) * math.min(1, dt * 5)
@@ -3780,7 +3788,7 @@ end
 local function buildHub()
 local TS  = game:GetService("TweenService")
 local UIS = game:GetService("UserInputService")
-local VERSION = "v48"
+local VERSION = "v49"
 local pickResp
 
 if getgenv then
@@ -4619,6 +4627,12 @@ do
         local opts = {0, 50, 90, 150, 300, 600}
         local i = table.find(opts, GK.mountSpeed) or 0
         GK.mountSpeed = opts[i % #opts + 1]
+    end)
+    cycle(pSteal, "↕️ Altura na montaria", function() return (GK.mountUp > 0 and "+" or "") .. GK.mountUp end, function()
+        GK.mountUp = GK.mountUp >= 3 and -2 or GK.mountUp + 0.5
+    end)
+    cycle(pSteal, "↔️ Mais pra trás na montaria", function() return (GK.mountBack > 0 and "+" or "") .. GK.mountBack end, function()
+        GK.mountBack = GK.mountBack >= 3 and -1.5 or GK.mountBack + 0.5
     end)
     note(pSteal, "Escolha o pet na aba 🐾 Pets. Uma cópia sua monta nele; pros outros você está parado.")
     task.spawn(function()
