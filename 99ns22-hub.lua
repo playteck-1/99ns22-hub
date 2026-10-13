@@ -1062,7 +1062,7 @@ end)
 -- ===== o que o JOGO mostra nos pets reais (aprendido olhando as bases dos outros jogadores) =====
 -- Gravacao do jogo: cada pet real tem a placa "Data" (DisplayName, PerSecond "$4.6B/s", Odds = raridade).
 -- Copiamos essa placa (mesmo visual) e aprendemos renda/raridade de cada pet. Fica salvo em arquivo.
-GK = {lite = game:GetService("UserInputService").TouchEnabled and not game:GetService("UserInputService").KeyboardEnabled,
+GK = {notify = false, incomeOverride = nil, lite = game:GetService("UserInputService").TouchEnabled and not game:GetService("UserInputService").KeyboardEnabled,
     info = {}, grad = {}, file = "modvip_pet_learn.json", hatchMode = "Rápido", gameFx = true, speedMode = "Rápido", treadBonus = 300000, flashChar = true, runSpeed = 300, renderCache = {}, renderPure = {}}
 -- "assinatura" do esqueleto: se o modelo nao tem os mesmos ossos/juntas, a animacao do jogo fica toda errada nele
 function GK.petSource(name)
@@ -1070,7 +1070,7 @@ function GK.petSource(name)
     local am = RS:FindFirstChild("AssetModels")
     if not am then return end
     local sw = am:FindFirstChild("ToSwap")
-    return (sw and sw:FindFirstChild(name)) or am:FindFirstChild(name)
+    return (sw and sw:FindFirstChild(name)) or am:FindFirstChild(name) or (GK.extraPets and GK.extraPets[name])
 end
 function GK.rigSig(m)
     local names = {}
@@ -1504,6 +1504,7 @@ end
 
 -- renda por segundo (estavel por nome de pet)
 local function incomeFor(name)
+    if GK.incomeOverride then return GK.incomeOverride end
     local e = name and GK.info[name]
     if e and e.income then return e.income end
     local h = 0
@@ -2007,12 +2008,16 @@ end
 -- ovo treme, brilha e estoura
 function GK.hatchFx(s)
     local base = s.model:GetPivot()
+    -- treme em volta do PROPRIO centro e um pouco acima do chao (grande nao entra no chao)
+    local centerCF = base * s.centerToPivot:Inverse()
+    local lift = Vector3.new(0, math.min(1.5, s.size.Y * 0.06), 0)
     for i = 1, 24 do
         if not s.model.Parent then return end
-        local a = math.sin(i * 1.4) * math.rad(3 + i * 0.7)
-        s.model:PivotTo(base * CFrame.Angles(a * 0.4, 0, a))
+        local a = math.sin(i * 1.4) * math.rad(2 + i * 0.35)
+        s.model:PivotTo((centerCF + lift) * CFrame.Angles(a * 0.4, 0, a) * s.centerToPivot)
         task.wait(0.05)
     end
+    s.model:PivotTo(base)
     local center = (base * s.centerToPivot:Inverse()).Position
     GK.sound(GK.SND_PLACE, center, 1)
     local ball = Instance.new("Part")
@@ -2728,6 +2733,7 @@ local function handsPoint(av, hrp)
 end
 
 tripSteal = function(kind)
+    if GK.dismount then GK.dismount() end
     kind = kind or "egg"    -- "egg" = so rouba o ovo | "pet" = so busca o pet montado
     if tripBusy then return end
     if GK.stopRun then GK.stopRun() end
@@ -2822,6 +2828,8 @@ tripSteal = function(kind)
         stopArms = holdArms(av)
         local function carryStep(cf)
             local c = handsPoint(av, hrp) + Vector3.new(0, 0.2, 0)
+            -- ovo grande: carrega em cima da cabeca, senao metade dele fica dentro do chao
+            if cs.size and cs.size.Y > 3 then c = hrp.Position + Vector3.new(0, 2.6 + cs.size.Y / 2, 0) end
             carry:PivotTo(CFrame.new(c) * (cf - cf.Position) * cs.centerToPivot)
         end
         -- segue as maos todo frame (inclusive parado)
@@ -3039,6 +3047,7 @@ do
     end
     function GK.startRun()
         if run or tripBusy then return end
+        if GK.dismount then GK.dismount() end
         local ch = LP.Character
         local rh = ch and ch:FindFirstChild("HumanoidRootPart")
         local rhum = ch and ch:FindFirstChildOfClass("Humanoid")
@@ -3092,6 +3101,127 @@ do
                 Camera.FieldOfView = Camera.FieldOfView + (r.fov - Camera.FieldOfView) * math.min(1, dt * 6)
             end
         end)
+    end
+end
+
+-- ===== 💰 RENDA ESCOLHIDA tambem na placa dos SEUS pets de verdade (so na sua tela) =====
+task.spawn(function()
+    while task.wait(1) do
+        if not alive() then break end
+        local v = GK.incomeOverride
+        local f = workspace:FindFirstChild("ClientRenderedAssets")
+        if v and f then
+            local txt = "$" .. fmtMoney(v) .. "/s"
+            for _, m in ipairs(f:GetChildren()) do
+                if m:GetAttribute("OwnerUserId") == LP.UserId then
+                    local d = m:FindFirstChild("Data")
+                    local ps = d and d:FindFirstChild("PerSecond")
+                    if ps and ps.Text ~= txt then ps.Text = txt end
+                end
+            end
+        end
+    end
+end)
+
+-- ===== 🏇 MONTARIA (atualizacao 8 "Mounts") - so na sua tela =====
+-- Uma copia sua monta no pet escolhido; voce controla com WASD/analogico.
+-- O personagem real fica parado e invisivel SO pra voce (pros outros voce esta parado).
+GK.mountSpeed = 90
+do
+    local ride
+    function GK.isMounted() return ride ~= nil end
+    function GK.dismount()
+        if not ride then return end
+        local r = ride
+        ride = nil
+        pcall(function() r.conn:Disconnect() end)
+        setRealHidden(false)
+        local ch = LP.Character
+        local rh = ch and ch:FindFirstChild("HumanoidRootPart")
+        if rh then rh.Anchored = false end
+        local hum = ch and ch:FindFirstChildOfClass("Humanoid")
+        if hum then Camera.CameraSubject = hum end
+        pcall(function() r.av:Destroy() end)
+        pcall(function() r.pet:Destroy() end)
+        Camera.FieldOfView = r.fov
+    end
+    function GK.mount(name)
+        if ride or tripBusy then return false, "termine o que esta fazendo antes" end
+        if GK.stopRun then GK.stopRun() end
+        local ch = LP.Character
+        local rh = ch and ch:FindFirstChild("HumanoidRootPart")
+        local rhum = ch and ch:FindFirstChildOfClass("Humanoid")
+        if not rh or not rhum then return false, "sem personagem" end
+        local src = name and GK.petSource(name)
+        if not src then return false, "escolha um pet na aba Pets" end
+        local ok, pet = pcall(function() return src:Clone() end)
+        if not ok or not pet then return false, "nao deu pra copiar o pet" end
+        prep(pet)
+        pet.Name = "VisualMount"
+        pet.Parent = folder
+        local ms = {model = pet, k = 1}
+        pcall(function() ms.k = pet:GetScale() end)
+        measure(ms)
+        ms.origFoot = math.max(0.5, ms.size.X / ms.k)
+        rescale(ms, scale)
+        local animated = playAnim(pet, name, ms)
+        local av, hum, hrp = makeAvatar()
+        if not av then pet:Destroy() return false, "nao deu pra copiar voce" end
+        local rp = groundParams()
+        local g = workspace:Raycast(rh.Position, Vector3.new(0, -60, 0), rp)
+        local floor = g and g.Position.Y or (rh.Position.Y - 3)
+        local pos = Vector3.new(rh.Position.X, 0, rh.Position.Z)
+        local look = Vector3.new(rh.CFrame.LookVector.X, 0, rh.CFrame.LookVector.Z).Unit
+        rh.Anchored = true
+        local r = {av = av, pet = pet, fov = Camera.FieldOfView}
+        ride = r
+        task.spawn(function() while ride == r do setRealHidden(true) task.wait(0.4) end end)
+        Camera.CameraSubject = hum
+        avPlay(hum, "sit")
+        -- poeira nas patas quando corre
+        local dustA = Instance.new("Part")
+        dustA.Anchored = true; dustA.CanCollide = false; dustA.CanQuery = false; dustA.Transparency = 1
+        dustA.Size = Vector3.new(1, 1, 1); dustA.Parent = pet
+        local dust = Instance.new("ParticleEmitter", dustA)
+        dust.Texture = "rbxasset://textures/particles/smoke_main.dds"; dust.Color = ColorSequence.new(Color3.fromRGB(200, 185, 160))
+        dust.Rate = 0; dust.Speed = NumberRange.new(2, 5); dust.SpreadAngle = Vector2.new(60, 60)
+        dust.Lifetime = NumberRange.new(0.5, 0.9); dust.Size = NumberSequence.new(1.2, 3); dust.Transparency = NumberSequence.new(0.5, 1)
+        local moving, bobT = false, 0
+        r.conn = RunService.Heartbeat:Connect(function(dt)
+            if ride ~= r then return end
+            if not alive() or not av.Parent or not pet.Parent or not rhum.Parent then GK.dismount() return end
+            local dir = Vector3.new(rhum.MoveDirection.X, 0, rhum.MoveDirection.Z)
+            local mv = dir.Magnitude > 0.1
+            if mv then
+                dir = dir.Unit
+                pos = pos + dir * GK.mountSpeed * dt
+                look = look:Lerp(dir, math.min(1, dt * 8))
+                if look.Magnitude < 0.01 then look = dir end
+                look = look.Unit
+                rp.FilterDescendantsInstances = {folder, LP.Character}
+                local hit = workspace:Raycast(Vector3.new(pos.X, floor + 30, pos.Z), Vector3.new(0, -200, 0), rp)
+                if hit then floor = hit.Position.Y end
+            end
+            if mv ~= moving then
+                moving = mv
+                if ms.trWalk then
+                    if mv then ms.trIdle:Stop(0.2); ms.trWalk:Play(0.2) else ms.trWalk:Stop(0.2); ms.trIdle:Play(0.2) end
+                end
+                dust.Rate = mv and (GK.lite and 12 or 30) or 0
+            end
+            if mv and ms.trWalk then ms.trWalk:AdjustSpeed(math.clamp(GK.mountSpeed / 40, 1, 3)) end
+            -- pulinho de galope se o pet nao tiver animacao
+            bobT = bobT + dt
+            local bob = (not animated and mv) and math.abs(math.sin(bobT * 10)) * 0.8 or 0
+            local center = Vector3.new(pos.X, floor + ms.size.Y / 2 + bob, pos.Z)
+            local rot = CFrame.lookAt(Vector3.zero, look)
+            pet:PivotTo(CFrame.new(center) * rot * ms.centerToPivot)
+            hrp.CFrame = CFrame.new(center + Vector3.new(0, ms.size.Y / 2 + 1.6, 0)) * rot
+            dustA.CFrame = CFrame.new(Vector3.new(pos.X, floor + 0.5, pos.Z))
+            local target = r.fov + (mv and math.clamp((GK.mountSpeed - 60) / 20, 0, 20) or 0)
+            Camera.FieldOfView = Camera.FieldOfView + (target - Camera.FieldOfView) * math.min(1, dt * 5)
+        end)
+        return true
     end
 end
 
@@ -3588,9 +3718,16 @@ end)
 
 -- ================= LISTAS =================
 local function petNames()
-    local out = {}
+    local out, seen = {}, {}
+    local function add(m)
+        if m:IsA("Model") and not seen[m.Name] then seen[m.Name] = true; table.insert(out, m.Name) end
+    end
     local am = RS:FindFirstChild("AssetModels")
-    if am then for _, m in ipairs(am:GetChildren()) do if m:IsA("Model") then table.insert(out, m.Name) end end end
+    if am then
+        for _, m in ipairs(am:GetChildren()) do add(m) end
+        local sw = am:FindFirstChild("ToSwap")
+        if sw then for _, m in ipairs(sw:GetChildren()) do add(m) end end
+    end
     table.sort(out)
     return out
 end
@@ -3613,7 +3750,7 @@ end
 local function buildHub()
 local TS  = game:GetService("TweenService")
 local UIS = game:GetService("UserInputService")
-local VERSION = "v44"
+local VERSION = "v47"
 local pickResp
 
 if getgenv then
@@ -4080,6 +4217,7 @@ floatHolder.Size = UDim2.fromOffset(300, 200); floatHolder.Position = UDim2.new(
 floatHolder.BackgroundTransparency = 1
 local toastN, lastSpeedPop = 0, 0
 simPopup = function(text, isSpeed)
+    if not GK.notify then return end
     if isSpeed then
         if tick() - lastSpeedPop < 0.2 then return end
         lastSpeedPop = tick()
@@ -4179,8 +4317,14 @@ local function rebuild(filter)
             b.MouseButton1Click:Connect(function()
                 selected = n; chosenPet = n
                 setStatus("Selecionado: " .. n .. " (spawn e roubo)"); paintSel()
+                if GK.pickMount then
+                    GK.pickMount = false
+                    if GK.isMounted() then GK.dismount() end
+                    GK.mount(n)
+                    if GK.backToSteal then GK.backToSteal() end
+                end
             end)
-            cells[n] = {btn = b, st = st, src = RS.AssetModels:FindFirstChild(n), loaded = false}
+            cells[n] = {btn = b, st = st, src = GK.petSource(n), loaded = false}
         end
     end
     paintSel()
@@ -4196,11 +4340,36 @@ searchBox:GetPropertyChangedSignal("Text"):Connect(function()
     task.delay(0.35, function() if my == searchToken then rebuild(searchBox.Text) end end)
 end)
 rebuild("")
+-- pets novos guardados fora da pasta de sempre: procura aos poucos (sem travar) e poe na grade
+task.spawn(function()
+    task.wait(3)
+    GK.extraPets = GK.extraPets or {}
+    local have, added = {}, 0
+    for _, n in ipairs(names) do have[n] = true end
+    local am = RS:FindFirstChild("AssetModels")
+    local ok, all = pcall(function() return RS:GetDescendants() end)
+    if not ok then return end
+    for i, d in ipairs(all) do
+        if not alive() then return end
+        if i % 400 == 0 then task.wait() end
+        if added < 60 and d:IsA("Model") and not have[d.Name] and not (am and d:IsDescendantOf(am))
+            and (d:GetAttribute("ReviewCategory") or d:GetAttribute("PreparedSourceName")) and d:FindFirstChild("Model") then
+            have[d.Name] = true; added = added + 1
+            GK.extraPets[d.Name] = d
+            table.insert(names, d.Name)
+        end
+    end
+    all = nil
+    if added > 0 and alive() then
+        table.sort(names)
+        pcall(rebuild, searchBox.Text)
+    end
+end)
 
 row(pPets, {
     {"✨ Spawnar pet", "main", function()
         if not selected then setStatus("Escolha um pet na grade") return end
-        local src = RS.AssetModels:FindFirstChild(selected)
+        local src = GK.petSource(selected)
         if src and spawnModel(src, selected) then
             setStatus("Spawnou: " .. selected .. " (" .. #spawned .. ") — " .. mode)
             simPopup("✨ " .. selected .. " spawnado!")
@@ -4263,6 +4432,15 @@ row(pPets, {
     {"5x", "card", function() setScale(5) end},
     {"10x", "main", function() setScale(10) end},
 }, 36)
+cycle(pPets, "💰 Renda dos pets no cercado", function()
+    return GK.incomeOverride and ("$" .. fmtMoney(GK.incomeOverride) .. "/s") or "Real"
+end, function()
+    local opts = {false, 50e9, 250e9, 1e12, 50e12, 2e15}
+    local i = 1
+    for k, v in ipairs(opts) do if v == (GK.incomeOverride or false) then i = k end end
+    GK.incomeOverride = opts[i % #opts + 1] or nil
+    for _, sp in ipairs(spawned) do if not sp.isEgg then sp.income = nil end end
+end)
 toggle(pPets, "🚶 Pets passeiam pelo cercado", function() return wander end, function(v) wander = v end)
 row(pPets, {
     {"↩ Remover último", "card", function()
@@ -4334,7 +4512,7 @@ task.spawn(function()
             lastShownPet = chosenPet
             for _, c in ipairs(petThumbHolder:GetChildren()) do c:Destroy() end
             if chosenPet then
-                local src = RS.AssetModels:FindFirstChild(chosenPet)
+                local src = GK.petSource(chosenPet)
                 if src then local vf = makeThumb(petThumbHolder, src); vf.Size = UDim2.fromScale(1, 1); vf.Position = UDim2.new() end
                 petName.Text = chosenPet
                 local ar, src2 = petArea(chosenPet)
@@ -4391,6 +4569,36 @@ cycle(pSteal, "🌍 Área (sem pet escolhido)", function() return simArea end, f
     local i = table.find(SIM_AREAS, simArea) or 1
     simArea = SIM_AREAS[i % #SIM_AREAS + 1]
 end)
+do
+    section(pSteal, "🏇 Montaria (novo: atualização Mounts)")
+    button(pSteal, "🐾 Escolher montaria (qualquer pet)", "main", function()
+        GK.pickMount = true
+        GK.backToSteal = function() selectTab("Roubo") end
+        selectTab("Pets")
+        setStatus("Toque no pet que vai ser sua montaria")
+    end)
+    local refreshMount = toggle(pSteal, "🏇 Montar no pet escolhido", function() return GK.isMounted() end, function(v)
+        if v then
+            local ok, msg = GK.mount(chosenPet)
+            simPopup(ok and ("🏇 Montado no " .. tostring(chosenPet) .. "! Use WASD/analógico") or ("❌ " .. tostring(msg)))
+        else
+            GK.dismount()
+        end
+    end)
+    cycle(pSteal, "🐎 Velocidade da montaria", function() return tostring(GK.mountSpeed) end, function()
+        local opts = {50, 90, 150, 300, 600}
+        local i = table.find(opts, GK.mountSpeed) or 0
+        GK.mountSpeed = opts[i % #opts + 1]
+    end)
+    note(pSteal, "Escolha o pet na aba 🐾 Pets. Uma cópia sua monta nele; pros outros você está parado.")
+    task.spawn(function()
+        local last = GK.isMounted()
+        while task.wait(0.3) do
+            if not alive() then GK.dismount() break end
+            if GK.isMounted() ~= last then last = GK.isMounted(); refreshMount() end
+        end
+    end)
+end
 section(pSteal, "Correr Flash (só na sua tela)")
 local refreshRun = toggle(pSteal, "🏃 Correr Flash (controle com WASD/analógico)", function() return GK.isRunning() end, function(v)
     if v then GK.startRun() else GK.stopRun() end
@@ -4724,6 +4932,8 @@ do
 end
 
 local pExtra = newPage("Extra", "⚙️", 7)
+section(pExtra, "Notificações")
+toggle(pExtra, "🔔 Mostrar notificações", function() return GK.notify end, function(v) GK.notify = v end)
 section(pExtra, "Tamanho do menu")
 cycle(pExtra, "📱 Tamanho do menu", function()
     return (sim.uiMul and sim.uiMul > 0) and (math.floor(sim.uiMul * 100 + 0.5) .. "%") or "Automático"
