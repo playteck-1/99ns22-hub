@@ -2738,7 +2738,19 @@ end
 
 tripSteal = function(kind)
     if GK.dismount then GK.dismount() end
-    kind = kind or "egg"    -- "egg" = so rouba o ovo | "pet" = so busca o pet montado
+    kind = kind or "egg"    -- "egg" = so rouba o ovo | "pet" = o pet aparece direto (sem ir buscar)
+    if kind == "pet" then
+        local n = chosenPet
+        if not n then
+            setStatus("Escolha um pet na aba 🐾 Pets primeiro")
+            if simPopup then simPopup("Escolha um pet na aba Pets") end
+            return
+        end
+        if GK.buyPet(n) then
+            setStatus("🐉 " .. n .. (mode == "Base" and " apareceu na sua base" or " apareceu perto de você"))
+        end
+        return
+    end
     if tripBusy then return end
     if GK.stopRun then GK.stopRun() end
     tripCancel = false
@@ -3229,7 +3241,12 @@ end)
 -- Uma copia sua monta no pet escolhido; voce controla com WASD/analogico.
 -- O personagem real fica parado e invisivel SO pra voce (pros outros voce esta parado).
 GK.mountSpeed = 0     -- 0 = mesma velocidade do seu personagem
-GK.mountUp, GK.mountBack = 0, 0   -- ajuste fino de onde voce senta (aba Roubo)
+-- ajuste fino de onde voce senta, salvo POR PET (setas na tela enquanto monta)
+GK.mountAdj = {}
+pcall(function() GK.mountAdj = HttpService:JSONDecode(readfile("99ns22_montaria.json")) or {} end)
+function GK.saveMountAdj()
+    pcall(function() if writefile then writefile("99ns22_montaria.json", HttpService:JSONEncode(GK.mountAdj)) end end)
+end
 do
     local ride
     function GK.isMounted() return ride ~= nil end
@@ -3291,36 +3308,52 @@ do
         dust.Texture = "rbxasset://textures/particles/smoke_main.dds"; dust.Color = ColorSequence.new(Color3.fromRGB(200, 185, 160))
         dust.Rate = 0; dust.Speed = NumberRange.new(2, 5); dust.SpreadAngle = Vector2.new(60, 60)
         dust.Lifetime = NumberRange.new(0.5, 0.9); dust.Size = NumberSequence.new(1.2, 3); dust.Transparency = NumberSequence.new(0.5, 1)
-        -- acha as costas do pet: o topo das pecas visiveis num ponto um pouco atras do meio
-        -- (pela geometria das pecas, sem raio: o raio errava e voce afundava)
+        -- ONDE SENTAR: 1) ponto de montaria do proprio pet (se o jogo tiver) 2) costas do corpo principal.
+        -- O ponto fica preso no corpo, entao voce acompanha o pet quando ele anda/pula/balanca.
         pet:PivotTo(CFrame.new(Vector3.new(pos.X, floor + ms.size.Y / 2, pos.Z)) * CFrame.lookAt(Vector3.zero, look) * ms.centerToPivot)
-        local backZ = ms.size.Z * 0.15      -- quanto pra tras do meio voce senta
-        local backY = ms.size.Y * 0.4
-        pcall(function()
-            local c0 = Vector3.new(pos.X, floor + ms.size.Y / 2, pos.Z)
-            local hide = {HumanoidRootPart = true, CenterCFrame = true, CENTER = true, Hitbox = true, CustomBoundingBox = true, RootPart = true}
-            local best
-            for _, f in ipairs({1, 0.6, 1.4}) do
-                local pt = c0 - look * backZ * f
-                for _, d in ipairs(pet:GetDescendants()) do
-                    if d:IsA("BasePart") and d.Transparency < 0.95 and not hide[d.Name] then
-                        local cf, h = d.CFrame, d.Size / 2
-                        local ex = math.abs(cf.RightVector.X) * h.X + math.abs(cf.UpVector.X) * h.Y + math.abs(cf.LookVector.X) * h.Z
-                        local ey = math.abs(cf.RightVector.Y) * h.X + math.abs(cf.UpVector.Y) * h.Y + math.abs(cf.LookVector.Y) * h.Z
-                        local ez = math.abs(cf.RightVector.Z) * h.X + math.abs(cf.UpVector.Z) * h.Y + math.abs(cf.LookVector.Z) * h.Z
-                        local m = 0.85    -- miolo da peca (as bordas da caixa sao mais altas que o corpo de verdade)
-                        if math.abs(pt.X - cf.X) <= ex * m and math.abs(pt.Z - cf.Z) <= ez * m then
-                            local top = cf.Y + ey * 0.9
-                            if not best or top > best then best = top end
-                        end
-                    end
-                end
-                if best then break end
+        local hide = {HumanoidRootPart = true, CenterCFrame = true, CENTER = true, Hitbox = true, CustomBoundingBox = true, RootPart = true}
+        local seatAtt, body, bodyVol
+        for _, d in ipairs(pet:GetDescendants()) do
+            local n = d.Name:lower()
+            if not seatAtt and d:IsA("Attachment") and (n:find("rider") or n:find("mount") or n:find("seat") or n:find("saddle") or n == "ride") then
+                seatAtt = d
             end
-            if best then backY = math.clamp(best - c0.Y, -ms.size.Y * 0.2, ms.size.Y * 0.5) end
-        end)
+            if d:IsA("BasePart") and d.Transparency < 0.95 and not hide[d.Name] then
+                local v = d.Size.X * d.Size.Y * d.Size.Z
+                if not bodyVol or v > bodyVol then body, bodyVol = d, v end
+            end
+        end
+        local seatLocal
+        if not seatAtt and body then
+            local bc = body.CFrame
+            local topY
+            pcall(function()
+                local old = body.CanQuery
+                body.CanQuery = true
+                local ip = RaycastParams.new()
+                ip.FilterType = Enum.RaycastFilterType.Include
+                ip.FilterDescendantsInstances = {body}
+                local h = workspace:Raycast(bc.Position + Vector3.new(0, ms.size.Y * 2 + 5, 0), Vector3.new(0, -(ms.size.Y * 4 + 10), 0), ip)
+                body.CanQuery = old
+                if h then topY = h.Position.Y end
+            end)
+            if not topY then
+                local hs = body.Size / 2
+                topY = bc.Y + (math.abs(bc.RightVector.Y) * hs.X + math.abs(bc.UpVector.Y) * hs.Y + math.abs(bc.LookVector.Y) * hs.Z) * 0.8
+            end
+            seatLocal = bc:PointToObjectSpace(Vector3.new(bc.X, topY, bc.Z))
+        end
+        local function seatPoint()
+            if seatAtt and seatAtt.Parent then return seatAtt.WorldPosition end
+            if body and body.Parent and seatLocal then return body.CFrame:PointToWorldSpace(seatLocal) end
+            return pet:GetPivot().Position + Vector3.new(0, ms.size.Y * 0.4, 0)
+        end
+        -- ajuste salvo pra esse pet (cima/baixo e frente/tras)
+        local adj = GK.mountAdj[name] or {u = 0, b = 0}
+        GK.mountAdj[name] = adj
+        local step = math.clamp(ms.size.Y * 0.04, 0.25, 3)
         -- altura do quadril sentado acima da sela
-        local seat = (hum.RigType == Enum.HumanoidRigType.R15) and (hrp.Size.Y * 0.5 + 0.6) or 1.7
+        local seat = (hum.RigType == Enum.HumanoidRigType.R15) and (hrp.Size.Y * 0.5 + 0.5) or 1.5
         -- como no jogo: [F] Desmontar (e botao na tela pro celular)
         pcall(function()
             local sg = Instance.new("ScreenGui")
@@ -3335,6 +3368,28 @@ do
             local st = Instance.new("UIStroke", b); st.Color = Color3.fromRGB(120, 220, 120); st.Thickness = 2
             b.Parent = sg
             b.MouseButton1Click:Connect(function() GK.dismount() end)
+            -- setas: acerta onde voce senta (fica salvo pra esse pet)
+            local info = Instance.new("TextLabel")
+            info.AnchorPoint = Vector2.new(0.5, 1); info.Position = UDim2.new(0.5, 0, 1, -160); info.Size = UDim2.fromOffset(260, 20)
+            info.BackgroundTransparency = 1; info.Font = Enum.Font.GothamBold; info.TextSize = 13
+            info.TextColor3 = Color3.new(1, 1, 1); info.TextStrokeTransparency = 0.4; info.Parent = sg
+            local function showAdj()
+                info.Text = string.format("Posição: altura %+.1f  •  frente/trás %+.1f", adj.u, adj.b)
+            end
+            showAdj()
+            local function arrow(txt, x, y, f)
+                local a = Instance.new("TextButton")
+                a.AnchorPoint = Vector2.new(0.5, 1); a.Position = UDim2.new(0.5, x, 1, y); a.Size = UDim2.fromOffset(40, 40)
+                a.BackgroundColor3 = Color3.fromRGB(30, 30, 38); a.BackgroundTransparency = 0.2
+                a.Font = Enum.Font.GothamBlack; a.TextSize = 18; a.TextColor3 = Color3.new(1, 1, 1); a.Text = txt
+                Instance.new("UICorner", a).CornerRadius = UDim.new(0, 10)
+                a.Parent = sg
+                a.MouseButton1Click:Connect(function() f(); showAdj(); GK.saveMountAdj() end)
+            end
+            arrow("▲", -140, -112, function() adj.u = adj.u + step end)
+            arrow("▼", -140, -66, function() adj.u = adj.u - step end)
+            arrow("◀", 140, -112, function() adj.b = adj.b - step end)   -- pra frente
+            arrow("▶", 140, -66, function() adj.b = adj.b + step end)    -- pra tras
             r.gui = sg
             r.keyConn = game:GetService("UserInputService").InputBegan:Connect(function(io, gp)
                 if not gp and io.KeyCode == Enum.KeyCode.F then GK.dismount() end
@@ -3378,7 +3433,8 @@ do
             local center = Vector3.new(pos.X, floor + ms.size.Y / 2 + bob + hopY, pos.Z)
             local rot = CFrame.lookAt(Vector3.zero, look)
             pet:PivotTo(CFrame.new(center) * rot * ms.centerToPivot)
-            hrp.CFrame = CFrame.new(center + Vector3.new(0, backY + seat + GK.mountUp, 0) - look * (backZ + GK.mountBack)) * rot
+            local sp = seatPoint()
+            hrp.CFrame = CFrame.new(sp + Vector3.new(0, seat + adj.u, 0) - look * adj.b) * rot
             dustA.CFrame = CFrame.new(Vector3.new(pos.X, floor + 0.5, pos.Z))
             local target = r.fov + (mv and math.clamp((spd - 60) / 20, 0, 20) or 0)
             Camera.FieldOfView = Camera.FieldOfView + (target - Camera.FieldOfView) * math.min(1, dt * 5)
@@ -3912,7 +3968,7 @@ end
 local function buildHub()
 local TS  = game:GetService("TweenService")
 local UIS = game:GetService("UserInputService")
-local VERSION = "v50"
+local VERSION = "v51"
 local pickResp
 
 if getgenv then
@@ -4746,10 +4802,15 @@ task.spawn(function()
         if chosenPet ~= last then
             last = chosenPet
             actBtns[1].Text = chosenPet and ("🥚 Roubar ovo de " .. chosenPet) or "🥚 Roubar ovo (do mapa)"
-            actBtns[2].Text = chosenPet and ("🐉 Pegar " .. chosenPet .. " (montado)") or "🐉 Pegar pet do ovo (montado)"
+            actBtns[2].Text = chosenPet and ("🐉 Trazer " .. chosenPet) or "🐉 Trazer pet (escolha na aba Pets)"
         end
     end
 end)
+-- onde o pet trazido aparece (o mesmo modo da aba Pets)
+row(pSteal, {
+    {"🏠 Pet aparece na base", "card", function() setMode("Base") end},
+    {"🧍 Pet aparece perto de mim", "card", function() setMode("Seguir") end},
+}, 36)
 row(pSteal, {
     {"🎯 Escolher ovo", "card", function() end},   -- ligado abaixo (janela)
     {"⛔ Parar", "bad", function()
@@ -4785,12 +4846,11 @@ do
         local i = table.find(opts, GK.mountSpeed) or 0
         GK.mountSpeed = opts[i % #opts + 1]
     end)
-    cycle(pSteal, "↕️ Altura na montaria", function() return (GK.mountUp > 0 and "+" or "") .. GK.mountUp end, function()
-        GK.mountUp = GK.mountUp >= 3 and -2 or GK.mountUp + 0.5
+    button(pSteal, "↺ Zerar posição na montaria (todos os pets)", "card", function()
+        GK.mountAdj = {}; GK.saveMountAdj()
+        setStatus("Posição da montaria zerada")
     end)
-    cycle(pSteal, "↔️ Mais pra trás na montaria", function() return (GK.mountBack > 0 and "+" or "") .. GK.mountBack end, function()
-        GK.mountBack = GK.mountBack >= 3 and -1.5 or GK.mountBack + 0.5
-    end)
+    note(pSteal, "Montado, use as setas ▲▼ (altura) e ◀▶ (frente/trás) na tela. Fica salvo pra cada pet.")
     note(pSteal, "Escolha o pet na aba 🐾 Pets. Uma cópia sua monta nele; pros outros você está parado.")
     task.spawn(function()
         local last = GK.isMounted()
