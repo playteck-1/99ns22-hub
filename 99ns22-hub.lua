@@ -3373,6 +3373,7 @@ do
             info.AnchorPoint = Vector2.new(0.5, 1); info.Position = UDim2.new(0.5, 0, 1, -160); info.Size = UDim2.fromOffset(260, 20)
             info.BackgroundTransparency = 1; info.Font = Enum.Font.GothamBold; info.TextSize = 13
             info.TextColor3 = Color3.new(1, 1, 1); info.TextStrokeTransparency = 0.4; info.Parent = sg
+            local adjUi = {info}
             local function showAdj()
                 info.Text = string.format("Posição: altura %+.1f  •  frente/trás %+.1f", adj.u, adj.b)
             end
@@ -3385,11 +3386,29 @@ do
                 Instance.new("UICorner", a).CornerRadius = UDim.new(0, 10)
                 a.Parent = sg
                 a.MouseButton1Click:Connect(function() f(); showAdj(); GK.saveMountAdj() end)
+                table.insert(adjUi, a)
             end
-            arrow("▲", -140, -112, function() adj.u = adj.u + step end)
-            arrow("▼", -140, -66, function() adj.u = adj.u - step end)
-            arrow("◀", 140, -112, function() adj.b = adj.b - step end)   -- pra frente
-            arrow("▶", 140, -66, function() adj.b = adj.b + step end)    -- pra tras
+            arrow("▲", -172, -112, function() adj.u = adj.u + step end)
+            arrow("▼", -172, -66, function() adj.u = adj.u - step end)
+            arrow("◀", 172, -112, function() adj.b = adj.b - step end)   -- pra frente
+            arrow("▶", 172, -66, function() adj.b = adj.b + step end)    -- pra tras
+            -- 📐 mostra as setas / ✔ esconde quando ja ficou certinho (lembra pra proxima vez)
+            local tg = Instance.new("TextButton")
+            tg.AnchorPoint = Vector2.new(0.5, 1); tg.Position = UDim2.new(0.5, 122, 1, -110); tg.Size = UDim2.fromOffset(44, 44)
+            tg.BackgroundColor3 = Color3.fromRGB(30, 30, 38); tg.BackgroundTransparency = 0.15
+            tg.Font = Enum.Font.GothamBlack; tg.TextSize = 20; tg.TextColor3 = Color3.new(1, 1, 1)
+            Instance.new("UICorner", tg).CornerRadius = UDim.new(0, 12)
+            tg.Parent = sg
+            local function applyHide()
+                local hidden = GK.mountAdj.__esconder == true
+                for _, o in ipairs(adjUi) do o.Visible = not hidden end
+                tg.Text = hidden and "📐" or "✔"
+            end
+            tg.MouseButton1Click:Connect(function()
+                GK.mountAdj.__esconder = not (GK.mountAdj.__esconder == true)
+                applyHide(); GK.saveMountAdj()
+            end)
+            applyHide()
             r.gui = sg
             r.keyConn = game:GetService("UserInputService").InputBegan:Connect(function(io, gp)
                 if not gp and io.KeyCode == Enum.KeyCode.F then GK.dismount() end
@@ -3968,7 +3987,7 @@ end
 local function buildHub()
 local TS  = game:GetService("TweenService")
 local UIS = game:GetService("UserInputService")
-local VERSION = "v51"
+local VERSION = "v52"
 local pickResp
 
 if getgenv then
