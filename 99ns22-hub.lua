@@ -1032,7 +1032,10 @@ end
 local eggCat = {}
 local function onEggData(d)
     if type(d) == "table" and d.Uid then
-        eggCat[d.Uid] = {cat = d.AssetCategory, area = d.AreaId, pos = d.BottomCFrame and d.BottomCFrame.Position}
+        local mut = d.BaseMutation
+        if type(mut) ~= "string" and type(d.Mutations) == "table" then mut = d.Mutations[1] end
+        eggCat[d.Uid] = {cat = d.AssetCategory, area = d.AreaId, pos = d.BottomCFrame and d.BottomCFrame.Position,
+            mut = type(mut) == "string" and mut or nil}
     end
 end
 pcall(function()
@@ -1564,113 +1567,38 @@ local function eggModelFor(name)
     return f and f:FindFirstChild(name)
 end
 
--- ===== efeitos dos ovos: copia brilho/particulas dos ovos de verdade do mapa (mesmo pet > mesma raridade);
--- se nao achar nenhum, poe uma aura com a cor da raridade =====
-do
-    local FX = {ParticleEmitter = true, Beam = true, PointLight = true, SpotLight = true, SurfaceLight = true,
-        Sparkles = true, Fire = true, Smoke = true, Highlight = true}
-    local function fxList(m)
-        local out = {}
-        for _, d in ipairs(m:GetDescendants()) do if FX[d.ClassName] then table.insert(out, d) end end
-        return out
-    end
-    local function biggestPart(m)
-        local best, bv
-        for _, d in ipairs(m:GetDescendants()) do
-            if d:IsA("BasePart") and d.Name ~= "Hitbox" and d.Name ~= "CustomBoundingBox" then
-                local v = d.Size.X * d.Size.Y * d.Size.Z
-                if not bv or v > bv then best, bv = d, v end
+-- ===== ovo IGUAL ao do jogo =====
+-- Gravacao do jogo: os ovos do mapa nao tem particulas; o visual de cada um vem da cor sorteada
+-- e da mutacao (Golden, Rainbow...). Entao copiamos o OVO DE VERDADE do mapa (mesmo pet) quando existe.
+function GK.eggClone(cat, real, fbArea)
+    local src
+    local ri = real and real.Parent and eggCat[real.Name]
+    if ri and ri.cat == cat then src = real end
+    if not src and cat then
+        local f = workspace:FindFirstChild("AreaEggSlotsClient")
+        if f then
+            for _, m in ipairs(f:GetChildren()) do
+                local i = m:IsA("Model") and eggCat[m.Name]
+                if i and i.cat == cat then src = m break end
             end
         end
-        return best
     end
-    local function rarityOf(cat) local e = cat and GK.info[cat]; return e and e.rarity end
-    local function worldSource(cat)
-        local f = workspace:FindFirstChild("AreaEggSlotsClient"); if not f then return end
-        local rar, sameRar = rarityOf(cat), nil
-        for _, m in ipairs(f:GetChildren()) do
-            local info = m:IsA("Model") and eggCat[m.Name]
-            local c = info and info.cat
-            if c and (c == cat or (not sameRar and rar and rarityOf(c) == rar)) and #fxList(m) > 0 then
-                if c == cat then return m end
-                sameRar = m
-            end
-        end
-        return sameRar
+    local c
+    if src then
+        local old = src.Archivable
+        pcall(function() src.Archivable = true end)
+        c = cloneVisual(src)
+        pcall(function() src.Archivable = old end)
+        if c then pcall(function() c:ScaleTo(1) end) end    -- mesmo tamanho base do modelo do ovo (o ninho encolhe/aumenta)
     end
-    local function graft(dst, src)
-        local root = biggestPart(dst)
-        if not root then return 0 end
-        local n, made = 0, {}
-        local function partIn(sp)
-            local dp = sp and dst:FindFirstChild(sp.Name, true)
-            if dp and dp:IsA("BasePart") then return dp end
-            return root
-        end
-        local function attFor(sa)
-            if made[sa] then return made[sa] end
-            local sp = sa.Parent
-            local dp = partIn(sp)
-            local a = dp:FindFirstChild(sa.Name)
-            if not (a and a:IsA("Attachment")) then
-                a = Instance.new("Attachment")
-                a.Name = sa.Name
-                local k = (sp and sp:IsA("BasePart") and sp.Size.Magnitude > 0) and (dp.Size.Magnitude / sp.Size.Magnitude) or 1
-                a.CFrame = (sa.CFrame - sa.CFrame.Position) + sa.CFrame.Position * k
-                a.Parent = dp
-            end
-            made[sa] = a
-            return a
-        end
-        for _, fx in ipairs(fxList(src)) do
-            local ok = pcall(function()
-                local par = fx.Parent
-                local c = fx:Clone()
-                if fx:IsA("Beam") then
-                    if not (fx.Attachment0 and fx.Attachment1) then c:Destroy() error("sem pontas") end
-                    c.Attachment0 = attFor(fx.Attachment0); c.Attachment1 = attFor(fx.Attachment1)
-                    c.Parent = c.Attachment0.Parent
-                elseif fx:IsA("Highlight") then c.Adornee = nil; c.Parent = dst
-                elseif par:IsA("Attachment") then c.Parent = attFor(par)
-                elseif par:IsA("BasePart") then c.Parent = partIn(par)
-                else c.Parent = root end
-            end)
-            if ok then n = n + 1 end
-        end
-        return n
+    if not c then src = nil; c = cloneVisual(eggModelFor(cat) or GK.fallbackEgg(fbArea)) end
+    if not c then return end
+    for _, d in ipairs(c:GetDescendants()) do
+        if d:IsA("Highlight") then d:Destroy() end     -- brilho de "mira em cima" do jogo nao vem junto
     end
-    local RANK = {Common = 1, Uncommon = 2, Rare = 3, Epic = 4, Legendary = 5, Mythic = 6, Cosmic = 7, Secret = 8, Eternal = 9, Divine = 10}
-    local function aura(dst, cat)
-        local root = biggestPart(dst); if not root then return end
-        local rar = rarityOf(cat) or "Common"
-        local lv = RANK[rar] or 1
-        local col = GK.COLORS[rar] or Color3.new(1, 1, 1)
-        local sz = math.clamp(root.Size.Magnitude * 0.08, 0.2, 1.5)
-        local pe = Instance.new("ParticleEmitter")
-        pe.Name = "NS22EggFx"
-        pe.Texture = "rbxasset://textures/particles/sparkles_main.dds"
-        pe.Color = ColorSequence.new(col); pe.LightEmission = 1
-        pe.Rate = GK.lite and 3 or (2 + lv * 1.5)
-        pe.Lifetime = NumberRange.new(0.8, 1.5); pe.Speed = NumberRange.new(0.4, 1.6); pe.SpreadAngle = Vector2.new(180, 180)
-        pe.Size = NumberSequence.new({NumberSequenceKeypoint.new(0, sz), NumberSequenceKeypoint.new(1, 0)})
-        pe.Transparency = NumberSequence.new(0.1, 1)
-        pe.Parent = root
-        if lv >= 5 then
-            local l = Instance.new("PointLight"); l.Name = "NS22EggLight"; l.Color = col
-            l.Brightness = 1 + lv * 0.2; l.Range = math.clamp(root.Size.Magnitude * 1.5, 6, 30); l.Parent = root
-        end
-    end
-    -- chamado logo depois de copiar o modelo do ovo (antes de mudar o tamanho)
-    function GK.eggFx(c, cat, srcEgg)
-        if not c or #fxList(c) > 0 then return end
-        local src = (srcEgg and srcEgg.Parent and #fxList(srcEgg) > 0 and srcEgg) or worldSource(cat)
-        local n = 0
-        if src then
-            local ok, k = pcall(graft, c, src)
-            n = ok and k or 0
-        end
-        if n == 0 then pcall(aura, c, cat) end
-    end
+    local info = src and eggCat[src.Name]
+    if info and info.mut then c:SetAttribute("NS22Mut", info.mut) end   -- ovo Golden nasce pet Golden
+    return c
 end
 
 local petAreaCache   -- pet -> {area = true, ...} segundo as configs das areas
@@ -2081,6 +2009,11 @@ function GK.ready(s)
     local hl = Instance.new("Highlight")
     hl.FillColor = Color3.fromRGB(255, 245, 170); hl.OutlineColor = Color3.new(1, 1, 1)
     hl.FillTransparency = 1; hl.OutlineTransparency = 0.3; hl.Adornee = s.model; hl.Parent = s.model
+    pcall(function()
+        if GK.readyHL == nil then GK.readyHL = RS:FindFirstChild("ReadyEggPulseHighlight", true) or false end
+        local t = GK.readyHL
+        if t then hl.FillColor = t.FillColor; hl.OutlineColor = t.OutlineColor; hl.DepthMode = t.DepthMode end
+    end)
     local center = s.model:GetPivot() * s.centerToPivot:Inverse()
     local pp = Instance.new("Part")
     pp.Name = "HatchPrompt"; pp.Size = Vector3.new(1, 1, 1); pp.Transparency = 1
@@ -2241,6 +2174,7 @@ end
 function GK.bolt(a, b)
     local d = (b - a).Magnitude
     if d < 2 then return end
+    if GK.arc and d < 60 then GK.arc(a, b, 0.32) return end
     local n = math.clamp(math.floor(d / 25), 3, 8)
     local segs, prev = {}, a
     for i = 1, n do
@@ -2266,6 +2200,88 @@ function GK.bolt(a, b)
         end
         for _, g in ipairs(segs) do g:Destroy() end
     end)
+end
+-- raio eletrico: zigue-zague com miolo BRANCO e brilho amarelo/laranja, galhinhos e pisca-pisca (estilo Flash)
+GK.BOLT_COLORS = {Color3.fromRGB(255, 214, 40), Color3.fromRGB(255, 160, 20), Color3.fromRGB(255, 236, 120)}
+function GK.arc(a, b, w, branch)
+    local v = b - a
+    local d = v.Magnitude
+    if d < 0.3 then return end
+    w = w or 0.22
+    local dir = v.Unit
+    local side = dir:Cross(Vector3.new(0, 1, 0))
+    if side.Magnitude < 0.1 then side = Vector3.new(1, 0, 0) end
+    side = side.Unit
+    local up = side:Cross(dir)
+    local n = math.clamp(math.floor(d / 1.2), 3, 9)
+    local amp = math.min(d * 0.18, 3)
+    local col = GK.BOLT_COLORS[math.random(#GK.BOLT_COLORS)]
+    local parts, prev = {}, a
+    local function seg(p0, p1, width, color, tr)
+        local len = (p1 - p0).Magnitude
+        if len < 0.03 then return end
+        local g = Instance.new("Part")
+        g.Anchored = true; g.CanCollide = false; g.CanTouch = false; g.CanQuery = false; g.CastShadow = false
+        g.Material = Enum.Material.Neon; g.Color = color; g.Transparency = tr
+        g.Size = Vector3.new(width, width, len + width * 0.5)
+        g.CFrame = CFrame.lookAt((p0 + p1) / 2, p1)
+        g.Parent = folder
+        table.insert(parts, g)
+    end
+    for i = 1, n do
+        local p = a:Lerp(b, i / n)
+        if i < n then p = p + side * (math.random() - 0.5) * 2 * amp + up * (math.random() - 0.5) * 2 * amp end
+        seg(prev, p, w, col, 0.3)                       -- brilho
+        seg(prev, p, w * 0.4, Color3.new(1, 1, 1), 0)   -- miolo branco
+        if branch ~= false and i > 1 and i < n and math.random() < 0.3 then
+            local r = Vector3.new(math.random() - 0.5, math.random() - 0.5, math.random() - 0.5)
+            local bd = dir + (r.Magnitude > 0.01 and r.Unit or Vector3.zero) * 1.2
+            if bd.Magnitude > 0.1 then GK.arc(p, p + bd.Unit * d * (0.2 + math.random() * 0.25), w * 0.6, false) end
+        end
+        prev = p
+    end
+    task.spawn(function()
+        local life, t0 = 0.08 + math.random() * 0.1, tick()
+        while tick() - t0 < life do
+            local vis = math.random() < 0.75
+            for _, g in ipairs(parts) do g.LocalTransparencyModifier = vis and 0 or 1 end
+            task.wait(0.03)
+        end
+        for _ = 1, 3 do
+            for _, g in ipairs(parts) do g.LocalTransparencyModifier = 0; g.Transparency = g.Transparency + (1 - g.Transparency) * 0.5 end
+            task.wait(0.03)
+        end
+        for _, g in ipairs(parts) do g:Destroy() end
+    end)
+end
+-- raios SAINDO do corpo (bracos, pernas, peito) - mais pra tras, como o vento da corrida
+GK.ZAP_PARTS = {
+    Head = true, UpperTorso = true, LowerTorso = true, Torso = true,
+    LeftUpperArm = true, LeftLowerArm = true, LeftHand = true, RightUpperArm = true, RightLowerArm = true, RightHand = true,
+    LeftUpperLeg = true, LeftLowerLeg = true, LeftFoot = true, RightUpperLeg = true, RightLowerLeg = true, RightFoot = true,
+    ["Left Arm"] = true, ["Right Arm"] = true, ["Left Leg"] = true, ["Right Leg"] = true,
+}
+function GK.bodyZap(model, look, count)
+    if GK.zapFx == false then return end
+    local list = {}
+    for _, p in ipairs(model:GetChildren()) do
+        if p:IsA("BasePart") and GK.ZAP_PARTS[p.Name] and p.Transparency < 1 then table.insert(list, p) end
+    end
+    if #list == 0 then return end
+    for _ = 1, count or 1 do
+        local p = list[math.random(#list)]
+        local h = p.Size / 2
+        local o = p.CFrame * Vector3.new((math.random() - 0.5) * 2 * h.X, (math.random() - 0.5) * 2 * h.Y, (math.random() - 0.5) * 2 * h.Z)
+        local dir = Vector3.new(math.random() - 0.5, math.random() * 0.9 - 0.2, math.random() - 0.5)
+        if look and look.Magnitude > 0.01 then dir = dir - look.Unit * (0.5 + math.random() * 0.9) end
+        if dir.Magnitude < 0.05 then dir = Vector3.new(0, 1, 0) end
+        GK.arc(o, o + dir.Unit * (2 + math.random() * 3.5), 0.16 + math.random() * 0.1)
+    end
+    -- as vezes um raio corre pelo corpo (mao -> peito, perna -> perna)
+    if #list > 1 and math.random() < 0.35 then
+        local a, b = list[math.random(#list)], list[math.random(#list)]
+        if a ~= b then GK.arc(a.Position, b.Position, 0.14) end
+    end
 end
 -- ovo reserva quando o pet nao tem modelo de ovo proprio (antes dava erro no roubo)
 function GK.fallbackEgg(area)
@@ -2347,6 +2363,7 @@ local function chocar(s, cat)
     rd.stop()
     if not s.model.Parent or not alive() then return end
     if s.tagLabel then s.tagLabel.Text = "🐣 Chocando..." end
+    local eggMut = s.model:GetAttribute("NS22Mut")
     GK.hatchFx(s)
     local idx = table.find(spawned, s)
     if idx then table.remove(spawned, idx) end
@@ -2362,6 +2379,7 @@ local function chocar(s, cat)
     if ok and ps then
         sim.hatched = sim.hatched + 1
         ps.income = incomeFor(src.Name)
+        if eggMut and GK.MUTS and GK.MUTS[eggMut] and not ps.mut then pcall(GK.applyMut, ps, eggMut) end
         addTag(ps)
         if simPopup then simPopup("🐣 Nasceu: " .. src.Name) end
     end
@@ -2379,8 +2397,7 @@ local function simStealOne()
     if own then e = {m = own, info = eggCat[own.Name]} else e = pickEgg() end
     if not e then if simPopup then simPopup("Sem ovos dessa area no mapa") end return end
     local wantCat = chosenPet or (e.info and e.info.cat)
-    local c = cloneVisual(eggModelFor(wantCat) or e.m); if not c then return end
-    pcall(GK.eggFx, c, wantCat, (e.info and e.info.cat == wantCat) and e.m or nil)
+    local c = GK.eggClone(wantCat, e.m) or cloneVisual(e.m); if not c then return end
     GK.hideStolen(e.m)
     for _, p in ipairs(c:GetDescendants()) do
         if p:IsA("BasePart") and (p.Name == "Hitbox" or p.Name == "CustomBoundingBox") then p.Transparency = 1 end
@@ -2780,7 +2797,19 @@ local function startRunFx(av, hrp, speedFn)
     aura.Size = NumberSequence.new({NumberSequenceKeypoint.new(0, 2.5), NumberSequenceKeypoint.new(1, 0)})
     aura.Transparency = NumberSequence.new(0.3, 1)
     aura.Parent = hrp
-    local stuff = {a0, a1, tr, spark, aura}
+    local zl = Instance.new("PointLight"); zl.Color = Color3.fromRGB(255, 210, 60); zl.Range = 16; zl.Parent = hrp
+    local stuff = {a0, a1, tr, spark, aura, zl}
+    task.spawn(function()
+        while stuff[1].Parent and av.Parent do
+            if GK.zapFx ~= false then
+                pcall(GK.bodyZap, av, hrp.CFrame.LookVector, GK.lite and 1 or 2)
+                zl.Brightness = math.random() < 0.6 and (2 + math.random() * 3) or 0.3
+            else
+                zl.Brightness = 0
+            end
+            task.wait(GK.lite and 0.14 or 0.06)
+        end
+    end)
 
     local on = true
     local baseFov = Camera.FieldOfView
@@ -2938,11 +2967,8 @@ tripSteal = function(kind)
         avPlay(hum, "idle")
         progressBar(hrp, 1.2, "Roubando...")
         pcall(GK.guardChase, areaTxt, hrp)
-        local carry = cloneVisual(eggModelFor(cat) or egg or GK.fallbackEgg(petAreaName))
-            or cloneVisual(GK.fallbackEgg())
+        local carry = GK.eggClone(cat, egg, petAreaName) or cloneVisual(GK.fallbackEgg())
         if not carry then error("sem modelo de ovo pra " .. tostring(cat)) end
-        local ei = egg and eggCat[egg.Name]
-        pcall(GK.eggFx, carry, cat, (ei and ei.cat == cat) and egg or nil)
         for _, p in ipairs(carry:GetDescendants()) do
             if p:IsA("BasePart") and (p.Name == "Hitbox" or p.Name == "CustomBoundingBox") then p.Transparency = 1 end
         end
@@ -3087,6 +3113,7 @@ end
 -- ===== Flash no SEU personagem: so efeito (a velocidade de verdade quem manda e o servidor) =====
 do
     local last, boltFrom, ghostT, baseFov = nil, nil, 0, nil
+    local zapT, zLight = 0, nil
     local hb2
     hb2 = RunService.Heartbeat:Connect(function(dt)
         if not alive() then hb2:Disconnect() return end
@@ -3095,6 +3122,7 @@ do
         local hum = ch and ch:FindFirstChildOfClass("Humanoid")
         if not GK.flashChar or tripBusy or not hrp or not hum then
             last, boltFrom = nil, nil
+            if zLight then zLight:Destroy(); zLight = nil end
             if baseFov and not tripBusy then Camera.FieldOfView = baseFov; baseFov = nil end
             return
         end
@@ -3106,6 +3134,18 @@ do
             local feet = pos - Vector3.new(0, 1.2, 0)
             boltFrom = boltFrom or feet
             if (feet - boltFrom).Magnitude > 6 then GK.bolt(boltFrom, feet); boltFrom = feet end
+            -- raios saindo do corpo + luz eletrica piscando
+            zapT = zapT + dt
+            if zapT > (GK.lite and 0.14 or 0.06) then
+                zapT = 0
+                pcall(GK.bodyZap, ch, hum.MoveDirection, GK.lite and 1 or 2)
+            end
+            if GK.zapFx ~= false then
+                if not zLight or zLight.Parent ~= hrp then
+                    zLight = Instance.new("PointLight"); zLight.Color = Color3.fromRGB(255, 210, 60); zLight.Range = 14; zLight.Parent = hrp
+                end
+                zLight.Brightness = math.random() < 0.6 and (2 + math.random() * 3) or 0.3
+            end
             -- fantasmas amarelos (no celular sai menos, pra nao pesar)
             ghostT = ghostT + dt
             if ghostT > (GK.lite and 0.22 or 0.09) then
@@ -3136,6 +3176,7 @@ do
             Camera.FieldOfView = Camera.FieldOfView + (baseFov + 18 - Camera.FieldOfView) * math.min(1, dt * 6)
         else
             boltFrom = nil
+            if zLight then zLight:Destroy(); zLight = nil end
             if baseFov then
                 Camera.FieldOfView = Camera.FieldOfView + (baseFov - Camera.FieldOfView) * math.min(1, dt * 6)
                 if math.abs(Camera.FieldOfView - baseFov) < 0.3 then Camera.FieldOfView = baseFov; baseFov = nil end
@@ -4049,9 +4090,8 @@ end
 function GK.buyEgg(cat)
     if not myPlot() then simPopup("❌ Base não encontrada (aba Base → 📍)") return false end
     if #spawned >= MAX_ITEMS then simPopup("❌ Base cheia (" .. MAX_ITEMS .. ")") return false end
-    local c = cloneVisual(eggModelFor(cat) or GK.fallbackEgg())
+    local c = GK.eggClone(cat)
     if not c then return false end
-    pcall(GK.eggFx, c, cat)
     for _, p in ipairs(c:GetDescendants()) do
         if p:IsA("BasePart") and (p.Name == "Hitbox" or p.Name == "CustomBoundingBox") then p.Transparency = 1 end
     end
@@ -4133,7 +4173,7 @@ end
 local function buildHub()
 local TS  = game:GetService("TweenService")
 local UIS = game:GetService("UserInputService")
-local VERSION = "v53"
+local VERSION = "v55"
 local pickResp
 
 if getgenv then
@@ -5042,6 +5082,7 @@ task.spawn(function()
     end
 end)
 toggle(pSteal, "⚡ Efeito Flash no meu personagem", function() return GK.flashChar end, function(v) GK.flashChar = v end)
+toggle(pSteal, "🌩️ Raios saindo do corpo (correndo)", function() return GK.zapFx ~= false end, function(v) GK.zapFx = v end)
 cycle(pSteal, "⚡ Velocidade do roubo", function() return GK.speedMode end, function()
     local modes = {"Normal", "Rápido", "Muito rápido", "Esteira", "Flash", "Super Flash", "Instantâneo"}
     local i = table.find(modes, GK.speedMode) or 1
