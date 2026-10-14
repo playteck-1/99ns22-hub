@@ -3664,7 +3664,7 @@ end
 -- Sem Cabeca, mutacao Spectral, indice na aba 🎃.
 -- =====================================================================
 GK.H = {req = 250e9, file = "99ns22_assombrada.json", data = {disc = {}, bosses = 0, stolen = 0},
-    LEN = 500, HALF = 170, OPEN = 17, tpl = {}, byName = {}, nests = {}, wisps = {}, bats = {}}
+    LEN = 500, OPEN = 22, tpl = {}, byName = {}, nests = {}, wisps = {}, bats = {}}
 GK.hauntBase = GK.hauntBase or {}
 do
     local H = GK.H
@@ -3952,10 +3952,47 @@ do
             elseif z0 then z0, z1 = nil, nil end
         end
         local gz = (z0 and z1) and (z0 + z1) / 2 or ef.Z
-        H.G = Vector3.new(lastX, lastY or ef.Y, gz)
+        local gy = lastY or ef.Y
+        -- paredoes do corredor (dos dois lados): a area nova continua com a MESMA largura
+        local function styleOf(inst)
+            if not inst or not inst:IsA("BasePart") or inst:IsA("Terrain") then return end
+            local st = {mat = inst.Material, var = inst.MaterialVariant, tex = {}}
+            for _, c in ipairs(inst:GetChildren()) do
+                if c:IsA("Texture") or c:IsA("Decal") then table.insert(st.tex, c:Clone()) end
+            end
+            return st
+        end
+        local function wallAt(dir)
+            for _, back in ipairs({30, 60, 100}) do
+                local h = workspace:Raycast(Vector3.new(lastX - back, gy + 12, gz), Vector3.new(0, 0, dir * 260), rp)
+                if h and h.Instance.CanCollide then return h.Position.Z, h.Instance end
+            end
+        end
+        local zA, wA = wallAt(-1)
+        local zB, wB = wallAt(1)
+        if not zA or not zB or zB - zA < 60 or zB - zA > 420 then zA, zB = gz - 75, gz + 75 end
+        gz = (zA + zB) / 2
+        H.dzLo, H.dzHi = zA - gz, zB - gz
+        H.wallStyle = styleOf(wA) or styleOf(wB)
+        -- estilo do chao do mapa (textura de pecinhas) pra area nova combinar
+        local gh = workspace:Raycast(Vector3.new(lastX - 20, gy + 60, gz), Vector3.new(0, -140, 0), rp)
+        H.groundStyle = gh and styleOf(gh.Instance)
+        H.G = Vector3.new(lastX, gy, gz)
         H.C = H.G + Vector3.new(H.LEN / 2, 0, 0)
         H.located = groundAt(ef.X, ef.Z) ~= nil
         return true
+    end
+    -- veste a peca com o material/textura do mapa (com a cor da area assombrada)
+    function H.dress(part, st, color)
+        part.Color = color
+        if not st then return end
+        pcall(function() part.Material = st.mat end)
+        pcall(function() if st.var and st.var ~= "" then part.MaterialVariant = st.var end end)
+        for _, t in ipairs(st.tex) do
+            local c = t:Clone()
+            pcall(function() c.Color3 = color:Lerp(Color3.new(1, 1, 1), 0.35) end)
+            c.Parent = part
+        end
     end
     -- paredes do fim do mapa (do jogo) que tampam a entrada: somem SO pra voce (a colisao continua)
     function H.hideEndWalls()
@@ -3977,54 +4014,102 @@ do
         if H.world then return end
         H.building = true
         local G = H.G
-        local L, W = H.LEN, H.HALF
+        local L = H.LEN
+        local zL, zH = H.dzLo or -75, H.dzHi or 75      -- paredoes (relativo ao meio do corredor)
         local R = Random.new(1337)
         local function P(dx, dy, dz) return G + Vector3.new(dx, dy, dz) end
         H.world = Instance.new("Folder"); H.world.Name = "NS22Assombrada"
         local lite = GK.lite
-        local dirt = Color3.fromRGB(64, 50, 38)
+        local dirt = Color3.fromRGB(70, 52, 60)
         local cyl = Enum.PartType.Cylinder
         local up = CFrame.Angles(0, 0, math.rad(90))
         local iron = Color3.fromRGB(20, 20, 24)
-        -- chao (continua o corredor) e a estrada
-        H.p(Vector3.new(L, 4, W * 2 + 10), CFrame.new(P(L / 2, -2 + 0.04, 0)), Color3.fromRGB(36, 42, 32), Enum.Material.Grass)
-        H.p(Vector3.new(L, 0.2, 18), CFrame.new(P(L / 2, 0.1, 0)), dirt, Enum.Material.Ground)
+        local stone = Color3.fromRGB(62, 56, 76)
+        local stone2 = Color3.fromRGB(48, 44, 60)
+        local moss = Color3.fromRGB(46, 70, 44)
+        local wood = Color3.fromRGB(70, 48, 34)
+        local slime = Color3.fromRGB(90, 255, 120)
+        -- chao do corredor (mesma textura do mapa, grama escura) + estrada no meio
+        local gr = H.p(Vector3.new(L, 4, (zH - zL) + 70), CFrame.new(P(L / 2, -2 + 0.04, (zL + zH) / 2)), Color3.fromRGB(58, 74, 52), Enum.Material.Grass)
+        H.dress(gr, H.groundStyle, Color3.fromRGB(58, 74, 52))
+        local road = H.p(Vector3.new(L, 0.2, 20), CFrame.new(P(L / 2, 0.1, 0)), dirt, Enum.Material.Ground)
+        H.dress(road, H.groundStyle, dirt)
         H.p(Vector3.new(0.2, 70, 70), CFrame.new(P(250, 0.12, 0)) * up, dirt, Enum.Material.Ground, nil, cyl)
-        -- cerca de ferro nas laterais e no fundo; na frente so dos lados do portao
-        local function fenceLine(a, b)
-            local n = math.max(1, math.floor((b - a).Magnitude / (lite and 12 or 8)))
-            local prev
-            for i = 0, n do
-                local pos = a:Lerp(b, i / n)
-                H.p(Vector3.new(0.5, 7, 0.5), CFrame.new(pos + Vector3.new(0, 3.5, 0)), iron, Enum.Material.Metal)
-                H.p(Vector3.new(0.35, 0.9, 0.35), CFrame.new(pos + Vector3.new(0, 7.3, 0)) * CFrame.Angles(0, 0, math.rad(45)), iron, Enum.Material.Metal)
-                if prev then
-                    for _, hy in ipairs({2, 5.5}) do
-                        local a1, b1 = prev + Vector3.new(0, hy, 0), pos + Vector3.new(0, hy, 0)
-                        H.p(Vector3.new(0.2, 0.2, (b1 - a1).Magnitude), CFrame.lookAt((a1 + b1) / 2, b1), iron, Enum.Material.Metal)
-                    end
-                end
-                prev = pos
+        -- canais de gosma verde junto dos paredoes (no lugar da agua do corredor)
+        for _, z in ipairs({zL + 5, zH - 5}) do
+            local ch = H.p(Vector3.new(L, 0.4, 8), CFrame.new(P(L / 2, 0.06, z)), slime, Enum.Material.Neon)
+            ch.Transparency = 0.35
+            if not lite then
+                local e = Instance.new("ParticleEmitter")
+                e.Texture = "rbxasset://textures/particles/sparkles_main.dds"; e.Color = ColorSequence.new(slime)
+                e.LightEmission = 1; e.Rate = 6; e.Lifetime = NumberRange.new(1, 2); e.Speed = NumberRange.new(0.5, 1.5)
+                e.SpreadAngle = Vector2.new(20, 20); e.Size = NumberSequence.new({NumberSequenceKeypoint.new(0, 0.5), NumberSequenceKeypoint.new(1, 0)})
+                e.Parent = ch
             end
         end
-        fenceLine(P(0, 0, -W), P(L, 0, -W))
-        fenceLine(P(0, 0, W), P(L, 0, W))
-        fenceLine(P(L, 0, -W), P(L, 0, W))
-        fenceLine(P(0, 0, -W), P(0, 0, -H.OPEN - 6))
-        fenceLine(P(0, 0, H.OPEN + 6), P(0, 0, W))
-        -- portao de entrada: pilares de pedra, arco, placa, aboboras e lanternas
-        local stone = Color3.fromRGB(58, 54, 66)
-        for _, s in ipairs({-1, 1}) do
-            local z = s * (H.OPEN + 3)
-            H.p(Vector3.new(6, 26, 6), CFrame.new(P(0, 13, z)), stone, Enum.Material.Slate)
-            H.p(Vector3.new(7.5, 1.5, 7.5), CFrame.new(P(0, 26.7, z)), Color3.fromRGB(35, 30, 45), Enum.Material.Slate)
-            local pm = H.pumpkin(CFrame.new(P(0, 29.6, z)) * CFrame.Angles(0, math.rad(90), 0), 1.8, Color3.fromRGB(255, 120, 15), Color3.fromRGB(255, 200, 60), true)
-            pm.Parent = H.world
-            local lamp = H.p(Vector3.new(1.4, 2, 1.4), CFrame.new(P(-3.6, 16, z)), Color3.fromRGB(90, 255, 130), Enum.Material.Neon)
-            local l = Instance.new("PointLight"); l.Color = Color3.fromRGB(90, 255, 130); l.Range = 20; l.Brightness = 2; l.Parent = lamp
+        -- paredoes de bloco dos dois lados (igual ao corredor, so que assombrado): degraus, musgo,
+        -- cristais brilhando saindo da parede e arvores secas em cima
+        local seg = lite and 40 or 24
+        for x = 0, L - seg, seg do
+            for _, side in ipairs({-1, 1}) do
+                local wz = side < 0 and zL or zH
+                local h = R:NextNumber(40, 72)
+                local blk = H.p(Vector3.new(seg, h, 30), CFrame.new(P(x + seg / 2, h / 2, wz + side * 15)), stone, Enum.Material.Slate)
+                H.dress(blk, H.wallStyle, stone)
+                H.p(Vector3.new(seg + 0.4, 2.4, 30.4), CFrame.new(P(x + seg / 2, h + 1.2, wz + side * 15)), moss, Enum.Material.Grass)
+                -- degrau mais baixo pra dentro (fica com cara de penhasco de blocos)
+                if R:NextNumber() < 0.6 then
+                    local h2 = h * R:NextNumber(0.3, 0.55)
+                    local st = H.p(Vector3.new(seg * R:NextNumber(0.5, 1), h2, 8), CFrame.new(P(x + seg / 2, h2 / 2, wz - side * 1)), stone2, Enum.Material.Slate)
+                    H.dress(st, H.wallStyle, stone2)
+                    H.p(Vector3.new(st.Size.X + 0.4, 1.6, 8.4), CFrame.new(P(x + seg / 2, h2 + 0.8, wz - side * 1)), moss, Enum.Material.Grass)
+                end
+                -- cristal brilhando saindo da parede
+                if R:NextNumber() < 0.45 then
+                    local cc = (R:NextNumber() < 0.5) and Color3.fromRGB(170, 80, 255) or slime
+                    local cpos = P(x + R:NextNumber(4, seg - 4), R:NextNumber(10, h - 8), wz + side * 0.5)
+                    local cr = H.p(Vector3.new(2.2, 7, 2.2), CFrame.new(cpos) * CFrame.Angles(math.rad(-side * 50), 0, math.rad(R:NextNumber(-25, 25))), cc, Enum.Material.Neon)
+                    cr.Transparency = 0.15
+                    local l = Instance.new("PointLight"); l.Color = cc; l.Range = 18; l.Brightness = 1.5; l.Parent = cr
+                end
+                if R:NextNumber() < 0.3 then H.tree(P(x + seg / 2, h + 2, wz + side * 12), R:NextNumber(12, 20), R) end
+            end
         end
-        local beam = H.p(Vector3.new(5, 4, H.OPEN * 2 + 12), CFrame.new(P(0, 24, 0)), stone, Enum.Material.Slate)
-        for k = -2, 2 do H.p(Vector3.new(0.4, 1.2, 4), CFrame.new(P(-2.7, 24, k * 6)), (k % 2 == 0) and Color3.fromRGB(140, 60, 255) or Color3.fromRGB(80, 255, 130), Enum.Material.Neon) end
+        -- postes de madeira com lanterna pendurada (como no corredor), fogo verde
+        for _, side in ipairs({-1, 1}) do
+            local z = (side < 0 and zL or zH) - side * 13
+            for x = 25, L - 70, 50 do
+                local b = P(x, 0, z)
+                H.p(Vector3.new(1, 12, 1), CFrame.new(b + Vector3.new(0, 6, 0)), wood, Enum.Material.Wood)
+                H.p(Vector3.new(1, 1, 4), CFrame.new(b + Vector3.new(0, 11.5, -side * 1.8)), wood, Enum.Material.Wood)
+                H.p(Vector3.new(0.15, 1.2, 0.15), CFrame.new(b + Vector3.new(0, 10.4, -side * 3.4)), iron, Enum.Material.Metal)
+                local lamp = H.p(Vector3.new(1.3, 1.8, 1.3), CFrame.new(b + Vector3.new(0, 9, -side * 3.4)), slime, Enum.Material.Neon)
+                H.p(Vector3.new(1.6, 0.3, 1.6), CFrame.new(b + Vector3.new(0, 10, -side * 3.4)), iron, Enum.Material.Metal)
+                local l = Instance.new("PointLight"); l.Color = slime; l.Brightness = 2; l.Range = 24; l.Parent = lamp
+            end
+        end
+        -- paredao da entrada com o PORTAO no meio (arco, placa, aboboras)
+        for _, side in ipairs({-1, 1}) do
+            local z0 = side * (H.OPEN + 6)
+            local z1 = side < 0 and zL or zH
+            local wlen = math.abs(z1 - z0)
+            if wlen > 1 then
+                local wb = H.p(Vector3.new(10, 34, wlen), CFrame.new(P(-5, 17, (z0 + z1) / 2)), stone, Enum.Material.Slate)
+                H.dress(wb, H.wallStyle, stone)
+                H.p(Vector3.new(10.4, 2.4, wlen), CFrame.new(P(-5, 35.2, (z0 + z1) / 2)), moss, Enum.Material.Grass)
+            end
+            local z = side * (H.OPEN + 3)
+            local pil = H.p(Vector3.new(8, 44, 8), CFrame.new(P(-5, 22, z)), stone2, Enum.Material.Slate)
+            H.dress(pil, H.wallStyle, stone2)
+            H.p(Vector3.new(9.5, 1.6, 9.5), CFrame.new(P(-5, 44.8, z)), Color3.fromRGB(35, 30, 45), Enum.Material.Slate)
+            local pm = H.pumpkin(CFrame.new(P(-5, 48, z)) * CFrame.Angles(0, math.rad(90), 0), 2, Color3.fromRGB(255, 120, 15), Color3.fromRGB(255, 200, 60), true)
+            pm.Parent = H.world
+            local lamp = H.p(Vector3.new(1.4, 2, 1.4), CFrame.new(P(-9.6, 20, z)), slime, Enum.Material.Neon)
+            local l = Instance.new("PointLight"); l.Color = slime; l.Range = 22; l.Brightness = 2; l.Parent = lamp
+        end
+        local beam = H.p(Vector3.new(8, 6, H.OPEN * 2 + 14), CFrame.new(P(-5, 40, 0)), stone2, Enum.Material.Slate)
+        H.dress(beam, H.wallStyle, stone2)
+        for k = -3, 3 do H.p(Vector3.new(0.4, 1.4, 4), CFrame.new(P(-9.2, 37.2, k * 6)), (k % 2 == 0) and Color3.fromRGB(140, 60, 255) or slime, Enum.Material.Neon) end
         local sg = Instance.new("SurfaceGui")
         sg.Face = Enum.NormalId.Left; sg.SizingMode = Enum.SurfaceGuiSizingMode.PixelsPerStud; sg.PixelsPerStud = 20; sg.LightInfluence = 0
         sg.Parent = beam
@@ -4032,13 +4117,15 @@ do
         t.Size = UDim2.fromScale(1, 1); t.BackgroundTransparency = 1; t.Font = Enum.Font.GothamBlack; t.TextScaled = true
         t.TextColor3 = Color3.fromRGB(255, 150, 40); t.TextStrokeTransparency = 0.2; t.Text = "🎃 DIMENSÃO ASSOMBRADA"
         local bb = Instance.new("BillboardGui")
-        bb.Size = UDim2.fromOffset(300, 46); bb.StudsOffset = Vector3.new(0, 8, 0); bb.AlwaysOnTop = true; bb.MaxDistance = 220
+        bb.Size = UDim2.fromOffset(320, 46); bb.StudsOffset = Vector3.new(0, 9, 0); bb.AlwaysOnTop = true; bb.MaxDistance = 260
         bb.Adornee = beam; bb.Parent = beam
         H.gateLabel = Instance.new("TextLabel", bb)
         H.gateLabel.Size = UDim2.fromScale(1, 1); H.gateLabel.BackgroundTransparency = 1; H.gateLabel.Font = Enum.Font.GothamBlack
         H.gateLabel.TextScaled = true; H.gateLabel.TextColor3 = Color3.new(1, 1, 1); H.gateLabel.TextStrokeTransparency = 0.2
         H.gateLabel.Text = H.gateText()
-        -- castelo assombrado no fundo (olhando pra entrada)
+        -- fundo do corredor: paredao + castelo assombrado (olhando pra entrada)
+        local endW = H.p(Vector3.new(14, 60, (zH - zL) + 30), CFrame.new(P(L + 7, 30, (zL + zH) / 2)), stone, Enum.Material.Slate)
+        H.dress(endW, H.wallStyle, stone)
         local cc = P(L - 40, 0, 0)
         local dark = Color3.fromRGB(35, 30, 45)
         local win = Color3.fromRGB(255, 150, 40)
@@ -4062,41 +4149,32 @@ do
         for _, wz in ipairs({-26, -13, 13, 26}) do
             for _, wy in ipairs({16, 30}) do H.p(Vector3.new(0.4, 5, 3), CFrame.new(cc + Vector3.new(-20.2, wy, wz)), win, Enum.Material.Neon) end
         end
-        H.p(Vector3.new(0.4, 6, 4), CFrame.new(cc + Vector3.new(-7.2, 58, 0)), Color3.fromRGB(90, 255, 120), Enum.Material.Neon)
+        H.p(Vector3.new(0.4, 6, 4), CFrame.new(cc + Vector3.new(-7.2, 58, 0)), slime, Enum.Material.Neon)
         H.p(Vector3.new(1, 18, 14), CFrame.new(cc + Vector3.new(-20.3, 9, 0)), Color3.fromRGB(15, 12, 18), Enum.Material.Wood)
         -- lua vermelha
-        H.p(Vector3.new(90, 90, 90), CFrame.new(P(L + 450, 300, -260)), Color3.fromRGB(210, 50, 40), Enum.Material.Neon, nil, Enum.PartType.Ball)
+        H.p(Vector3.new(90, 90, 90), CFrame.new(P(L + 450, 300, zL - 200)), Color3.fromRGB(210, 50, 40), Enum.Material.Neon, nil, Enum.PartType.Ball)
         -- ninhos: 2 fileiras, dos dois lados da estrada
         local nestPos = {}
         for _, dx in ipairs({110, 190, 310, 390}) do
-            for _, dz in ipairs({-62, 62}) do table.insert(nestPos, P(dx, 0, dz)) end
+            for _, dz in ipairs({zL * 0.5, zH * 0.5}) do table.insert(nestPos, P(dx, 0, dz)) end
         end
         local function freeSpot()
             for _ = 1, 30 do
-                local p = P(R:NextNumber(15, L - 75), 0, R:NextNumber(-W + 8, W - 8))
+                local p = P(R:NextNumber(15, L - 75), 0, R:NextNumber(zL + 16, zH - 16))
                 local ok = math.abs(p.Z - G.Z) > 14 and (p - P(250, 0, 0)).Magnitude > 38
                 for _, np in ipairs(nestPos) do if (np - p).Magnitude < 16 then ok = false break end end
                 if ok then return p end
             end
-            return P(L - 90, 0, W - 20)
+            return P(L - 90, 0, zH - 20)
         end
-        for _ = 1, lite and 8 or 18 do H.tree(freeSpot(), R:NextNumber(14, 24), R) end
-        for _ = 1, lite and 14 or 32 do H.grave(freeSpot(), R) end
+        for _ = 1, lite and 6 or 12 do H.tree(freeSpot(), R:NextNumber(14, 24), R) end
+        for _ = 1, lite and 14 or 30 do H.grave(freeSpot(), R) end
         for i = 1, lite and 10 or 18 do
             local p = freeSpot()
             local s = R:NextNumber(1.3, 2.8)
             local m = H.pumpkin(CFrame.new(p + Vector3.new(0, 1 * s, 0)) * CFrame.Angles(0, R:NextNumber() * 6.28, 0), s,
                 Color3.fromRGB(255, 120, 15), Color3.fromRGB(255, 200, 60), i % 2 == 0)
             m.Parent = H.world
-        end
-        -- postes com lanterna dos dois lados da estrada
-        for _, z in ipairs({-11, 11}) do
-            for x = 30, L - 70, 45 do
-                local b = P(x, 0, z)
-                H.p(Vector3.new(0.5, 9, 0.5), CFrame.new(b + Vector3.new(0, 4.5, 0)), iron, Enum.Material.Metal)
-                local lamp = H.p(Vector3.new(1.4, 1.4, 1.4), CFrame.new(b + Vector3.new(0, 9.4, 0)), Color3.fromRGB(255, 150, 50), Enum.Material.Neon, nil, Enum.PartType.Ball)
-                local l = Instance.new("PointLight"); l.Color = Color3.fromRGB(255, 150, 60); l.Brightness = 2; l.Range = 22; l.Parent = lamp
-            end
         end
         -- velas em volta da cama do guardiao (meio da area)
         for k = 1, 12 do
@@ -4764,7 +4842,7 @@ do
         end
         -- limites: cerca dos lados/fundo; a frente so abre no portao (por onde se volta pro mapa)
         local dx, dz = I.pos.X - G.X, I.pos.Z - G.Z
-        dz = math.clamp(dz, -H.HALF + 4, H.HALF - 4)
+        dz = math.clamp(dz, (H.dzLo or -75) + 10, (H.dzHi or 75) - 10)
         if dx > H.LEN - 6 then dx = H.LEN - 6 end
         if dx < 1 then
             -- no portao (ainda no chao do mapa): so dentro da passagem
@@ -5398,7 +5476,7 @@ end
 local function buildHub()
 local TS  = game:GetService("TweenService")
 local UIS = game:GetService("UserInputService")
-local VERSION = "v57"
+local VERSION = "v58"
 local pickResp
 
 if getgenv then
