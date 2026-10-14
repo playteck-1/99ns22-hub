@@ -3656,14 +3656,15 @@ do
 end
 
 -- =====================================================================
--- 🎃 DIMENSAO ASSOMBRADA (area nova depois da ultima - so na sua tela)
--- Portal no fim do mapa (depois da Enchanted Forest) ou botao na aba 🎃 do menu.
--- La dentro voce controla uma COPIA sua: o personagem de verdade fica parado e escondido
--- (pro jogo voce nao saiu do lugar, entao nao parece que voce esta voando no vazio).
--- Ninhos com ovos-abobora, guardiao Ceifador, chefe Cavaleiro Sem Cabeca, mutacao Spectral.
+-- 🎃 DIMENSAO ASSOMBRADA: AREA NOVA no fim do corredor do mapa (depois da Enchanted Forest) - so na sua tela
+-- O script acha onde o chao do mapa termina e "cola" a area nova ali (mesma altura, estrada continuando).
+-- Ao passar pelo portao, uma COPIA sua continua andando (o personagem de verdade para no portao e some
+-- so pra voce): pro jogo voce nao esta andando no vazio. Voltando pelo portao com ovo, voce leva o ovo
+-- de verdade ate a sua base (igual ao jogo). Ninhos com ovos-abobora, guardiao Ceifador, chefe Cavaleiro
+-- Sem Cabeca, mutacao Spectral, indice na aba 🎃.
 -- =====================================================================
 GK.H = {req = 250e9, file = "99ns22_assombrada.json", data = {disc = {}, bosses = 0, stolen = 0},
-    C = Vector3.new(6000, 900, 6000), R = 222, tpl = {}, byName = {}, nests = {}, wisps = {}, bats = {}}
+    LEN = 500, HALF = 170, OPEN = 17, tpl = {}, byName = {}, nests = {}, wisps = {}, bats = {}}
 GK.hauntBase = GK.hauntBase or {}
 do
     local H = GK.H
@@ -3784,7 +3785,7 @@ do
         end
         H.addFx(m, p)
     end
-    -- modelo pronto do pet novo (guardado; o jogo do hub copia dele)
+    -- modelo pronto do pet novo (guardado; o hub copia dele)
     function H.source(name)
         local p = H.byName[name]; if not p then return end
         if H.tpl[name] then return H.tpl[name] end
@@ -3910,140 +3911,204 @@ do
         end
         return H.p(Vector3.new(0.15, 8.4, 8.4), CFrame.new(pos + Vector3.new(0, 0.05, 0)) * CFrame.Angles(0, 0, math.rad(90)), Color3.fromRGB(150, 80, 255), Enum.Material.Neon, nil, Enum.PartType.Cylinder)
     end
-    -- portal: anel neon roxo/verde + disco brilhando + placa
-    function H.makePortal(cf, parent, text)
-        local f = Instance.new("Model"); f.Name = "NS22Portal"
-        local n = 26
-        for i = 1, n do
-            local a = i / n * math.pi * 2
-            H.p(Vector3.new(0.7, 1.9, 0.7), cf * CFrame.new(math.cos(a) * 7, math.sin(a) * 7, 0) * CFrame.Angles(0, 0, a),
-                (i % 2 == 0) and Color3.fromRGB(140, 60, 255) or Color3.fromRGB(80, 255, 130), Enum.Material.Neon, f)
+
+    -- ---------- onde o mapa termina (depois da Enchanted Forest) ----------
+    function H.efPos()
+        local mem = areaPosMem and areaPosMem["Enchanted Forest"]
+        return (type(mem) == "table" and mem[3] and Vector3.new(mem[1], mem[2], mem[3])) or AREA_POS["Enchanted Forest"]
+    end
+    function H.locate(force)
+        local ef = H.efPos()
+        local rp = RaycastParams.new()
+        rp.FilterType = Enum.RaycastFilterType.Exclude
+        rp.FilterDescendantsInstances = {folder, LP.Character}
+        local function groundAt(x, z)
+            local h = workspace:Raycast(Vector3.new(x, ef.Y + 60, z), Vector3.new(0, -140, 0), rp)
+            if h and h.Instance.CanCollide and math.abs(h.Position.Y - ef.Y) < 25 then return h.Position.Y end
         end
-        local disc = H.p(Vector3.new(0.25, 13.5, 13.5), cf * CFrame.Angles(0, math.rad(90), 0), Color3.fromRGB(110, 255, 160), Enum.Material.ForceField, f, Enum.PartType.Cylinder)
-        local pe = Instance.new("ParticleEmitter")
-        pe.Texture = "rbxasset://textures/particles/sparkles_main.dds"
-        pe.Color = ColorSequence.new(Color3.fromRGB(170, 90, 255), Color3.fromRGB(90, 255, 150))
-        pe.LightEmission = 1; pe.Rate = 30; pe.Lifetime = NumberRange.new(1, 1.6); pe.Speed = NumberRange.new(1, 3)
-        pe.SpreadAngle = Vector2.new(180, 180); pe.Size = NumberSequence.new({NumberSequenceKeypoint.new(0, 0.6), NumberSequenceKeypoint.new(1, 0)})
-        pe.Parent = disc
-        local l = Instance.new("PointLight"); l.Color = Color3.fromRGB(120, 255, 170); l.Brightness = 3; l.Range = 24; l.Parent = disc
-        local bb = Instance.new("BillboardGui")
-        bb.Size = UDim2.fromOffset(260, 64); bb.StudsOffset = Vector3.new(0, 10, 0); bb.AlwaysOnTop = true; bb.MaxDistance = 260
-        bb.Adornee = disc; bb.Parent = f
-        local t = Instance.new("TextLabel", bb)
-        t.Size = UDim2.fromScale(1, 1); t.BackgroundTransparency = 1; t.Font = Enum.Font.GothamBlack; t.TextScaled = true
-        t.TextColor3 = Color3.fromRGB(255, 160, 50); t.TextStrokeTransparency = 0.2; t.Text = text or ""
-        f.PrimaryPart = disc
-        f.Parent = parent
-        return f, t
+        -- anda pra +X ate o chao acabar
+        local lastX, lastY, miss = nil, nil, 0
+        for x = ef.X, ef.X + 700, 8 do
+            local y = groundAt(x, ef.Z)
+            if y then lastX, lastY, miss = x, y, 0
+            else
+                miss = miss + 1
+                if miss >= 4 and lastX then break end
+            end
+        end
+        if not lastX then
+            if not force then return false end
+            lastX, lastY = ef.X + 300, ef.Y
+        elseif lastX >= ef.X + 690 then
+            lastX = ef.X + 450      -- o chao nao acaba: a area nova comeca aqui mesmo
+        end
+        -- largura do chao no fim: o meio dele vira a entrada
+        local z0, z1
+        for z = ef.Z - 250, ef.Z + 250, 8 do
+            if groundAt(lastX - 10, z) then
+                if not z0 then z0 = z end
+                z1 = z
+            elseif z0 and z > ef.Z then break
+            elseif z0 then z0, z1 = nil, nil end
+        end
+        local gz = (z0 and z1) and (z0 + z1) / 2 or ef.Z
+        H.G = Vector3.new(lastX, lastY or ef.Y, gz)
+        H.C = H.G + Vector3.new(H.LEN / 2, 0, 0)
+        H.located = groundAt(ef.X, ef.Z) ~= nil
+        return true
+    end
+    -- paredes do fim do mapa (do jogo) que tampam a entrada: somem SO pra voce (a colisao continua)
+    function H.hideEndWalls()
+        pcall(function()
+            local op = OverlapParams.new()
+            op.FilterType = Enum.RaycastFilterType.Exclude
+            op.FilterDescendantsInstances = {folder, LP.Character}
+            local parts = workspace:GetPartBoundsInBox(CFrame.new(H.G + Vector3.new(-12, 25, 0)), Vector3.new(36, 50, H.OPEN * 2 + 16), op)
+            for _, p in ipairs(parts) do
+                if p.Size.Y > 6 and p.Position.Y > H.G.Y + 3 and p.Transparency < 1 and not p:IsDescendantOf(workspace:FindFirstChild("Plots") or folder) then
+                    p.LocalTransparencyModifier = 1
+                end
+            end
+        end)
     end
 
-    -- ---------- monta a dimensao (uma vez) ----------
+    -- ---------- monta a area (uma vez) ----------
     function H.build()
         if H.world then return end
         H.building = true
-        local C = H.C
+        local G = H.G
+        local L, W = H.LEN, H.HALF
         local R = Random.new(1337)
+        local function P(dx, dy, dz) return G + Vector3.new(dx, dy, dz) end
         H.world = Instance.new("Folder"); H.world.Name = "NS22Assombrada"
         local lite = GK.lite
         local dirt = Color3.fromRGB(64, 50, 38)
         local cyl = Enum.PartType.Cylinder
         local up = CFrame.Angles(0, 0, math.rad(90))
-        -- chao, clareira e caminho
-        H.p(Vector3.new(4, 520, 520), CFrame.new(C - Vector3.new(0, 2, 0)) * up, Color3.fromRGB(36, 42, 32), Enum.Material.Grass, nil, cyl)
-        H.p(Vector3.new(0.2, 70, 70), CFrame.new(C + Vector3.new(0, 0.05, 0)) * up, dirt, Enum.Material.Ground, nil, cyl)
-        H.p(Vector3.new(14, 0.2, 170), CFrame.new(C + Vector3.new(0, 0.06, 105)), dirt, Enum.Material.Ground)
-        -- cerca de ferro em volta
-        local nPost = lite and 40 or 64
-        local prev
-        for i = 0, nPost do
-            local a = i / nPost * math.pi * 2
-            local pos = C + Vector3.new(math.cos(a) * 232, 0, math.sin(a) * 232)
-            if i < nPost then
-                H.p(Vector3.new(0.5, 7, 0.5), CFrame.new(pos + Vector3.new(0, 3.5, 0)), Color3.fromRGB(20, 20, 24), Enum.Material.Metal)
-                H.p(Vector3.new(0.35, 0.9, 0.35), CFrame.new(pos + Vector3.new(0, 7.3, 0)) * CFrame.Angles(0, 0, math.rad(45)), Color3.fromRGB(20, 20, 24), Enum.Material.Metal)
-            end
-            if prev then
-                for _, hy in ipairs({2, 5.5}) do
-                    local a1, b1 = prev + Vector3.new(0, hy, 0), pos + Vector3.new(0, hy, 0)
-                    H.p(Vector3.new(0.2, 0.2, (b1 - a1).Magnitude), CFrame.lookAt((a1 + b1) / 2, b1), Color3.fromRGB(20, 20, 24), Enum.Material.Metal)
+        local iron = Color3.fromRGB(20, 20, 24)
+        -- chao (continua o corredor) e a estrada
+        H.p(Vector3.new(L, 4, W * 2 + 10), CFrame.new(P(L / 2, -2 + 0.04, 0)), Color3.fromRGB(36, 42, 32), Enum.Material.Grass)
+        H.p(Vector3.new(L, 0.2, 18), CFrame.new(P(L / 2, 0.1, 0)), dirt, Enum.Material.Ground)
+        H.p(Vector3.new(0.2, 70, 70), CFrame.new(P(250, 0.12, 0)) * up, dirt, Enum.Material.Ground, nil, cyl)
+        -- cerca de ferro nas laterais e no fundo; na frente so dos lados do portao
+        local function fenceLine(a, b)
+            local n = math.max(1, math.floor((b - a).Magnitude / (lite and 12 or 8)))
+            local prev
+            for i = 0, n do
+                local pos = a:Lerp(b, i / n)
+                H.p(Vector3.new(0.5, 7, 0.5), CFrame.new(pos + Vector3.new(0, 3.5, 0)), iron, Enum.Material.Metal)
+                H.p(Vector3.new(0.35, 0.9, 0.35), CFrame.new(pos + Vector3.new(0, 7.3, 0)) * CFrame.Angles(0, 0, math.rad(45)), iron, Enum.Material.Metal)
+                if prev then
+                    for _, hy in ipairs({2, 5.5}) do
+                        local a1, b1 = prev + Vector3.new(0, hy, 0), pos + Vector3.new(0, hy, 0)
+                        H.p(Vector3.new(0.2, 0.2, (b1 - a1).Magnitude), CFrame.lookAt((a1 + b1) / 2, b1), iron, Enum.Material.Metal)
+                    end
                 end
+                prev = pos
             end
-            prev = pos
         end
-        -- castelo assombrado no fundo
-        local cc = C + Vector3.new(0, 0, -300)
-        local stone, dark = Color3.fromRGB(58, 54, 66), Color3.fromRGB(35, 30, 45)
+        fenceLine(P(0, 0, -W), P(L, 0, -W))
+        fenceLine(P(0, 0, W), P(L, 0, W))
+        fenceLine(P(L, 0, -W), P(L, 0, W))
+        fenceLine(P(0, 0, -W), P(0, 0, -H.OPEN - 6))
+        fenceLine(P(0, 0, H.OPEN + 6), P(0, 0, W))
+        -- portao de entrada: pilares de pedra, arco, placa, aboboras e lanternas
+        local stone = Color3.fromRGB(58, 54, 66)
+        for _, s in ipairs({-1, 1}) do
+            local z = s * (H.OPEN + 3)
+            H.p(Vector3.new(6, 26, 6), CFrame.new(P(0, 13, z)), stone, Enum.Material.Slate)
+            H.p(Vector3.new(7.5, 1.5, 7.5), CFrame.new(P(0, 26.7, z)), Color3.fromRGB(35, 30, 45), Enum.Material.Slate)
+            local pm = H.pumpkin(CFrame.new(P(0, 29.6, z)) * CFrame.Angles(0, math.rad(90), 0), 1.8, Color3.fromRGB(255, 120, 15), Color3.fromRGB(255, 200, 60), true)
+            pm.Parent = H.world
+            local lamp = H.p(Vector3.new(1.4, 2, 1.4), CFrame.new(P(-3.6, 16, z)), Color3.fromRGB(90, 255, 130), Enum.Material.Neon)
+            local l = Instance.new("PointLight"); l.Color = Color3.fromRGB(90, 255, 130); l.Range = 20; l.Brightness = 2; l.Parent = lamp
+        end
+        local beam = H.p(Vector3.new(5, 4, H.OPEN * 2 + 12), CFrame.new(P(0, 24, 0)), stone, Enum.Material.Slate)
+        for k = -2, 2 do H.p(Vector3.new(0.4, 1.2, 4), CFrame.new(P(-2.7, 24, k * 6)), (k % 2 == 0) and Color3.fromRGB(140, 60, 255) or Color3.fromRGB(80, 255, 130), Enum.Material.Neon) end
+        local sg = Instance.new("SurfaceGui")
+        sg.Face = Enum.NormalId.Left; sg.SizingMode = Enum.SurfaceGuiSizingMode.PixelsPerStud; sg.PixelsPerStud = 20; sg.LightInfluence = 0
+        sg.Parent = beam
+        local t = Instance.new("TextLabel", sg)
+        t.Size = UDim2.fromScale(1, 1); t.BackgroundTransparency = 1; t.Font = Enum.Font.GothamBlack; t.TextScaled = true
+        t.TextColor3 = Color3.fromRGB(255, 150, 40); t.TextStrokeTransparency = 0.2; t.Text = "🎃 DIMENSÃO ASSOMBRADA"
+        local bb = Instance.new("BillboardGui")
+        bb.Size = UDim2.fromOffset(300, 46); bb.StudsOffset = Vector3.new(0, 8, 0); bb.AlwaysOnTop = true; bb.MaxDistance = 220
+        bb.Adornee = beam; bb.Parent = beam
+        H.gateLabel = Instance.new("TextLabel", bb)
+        H.gateLabel.Size = UDim2.fromScale(1, 1); H.gateLabel.BackgroundTransparency = 1; H.gateLabel.Font = Enum.Font.GothamBlack
+        H.gateLabel.TextScaled = true; H.gateLabel.TextColor3 = Color3.new(1, 1, 1); H.gateLabel.TextStrokeTransparency = 0.2
+        H.gateLabel.Text = H.gateText()
+        -- castelo assombrado no fundo (olhando pra entrada)
+        local cc = P(L - 40, 0, 0)
+        local dark = Color3.fromRGB(35, 30, 45)
         local win = Color3.fromRGB(255, 150, 40)
-        H.p(Vector3.new(80, 40, 40), CFrame.new(cc + Vector3.new(0, 20, 0)), stone, Enum.Material.Slate)
-        for x = -36, 36, 8 do H.p(Vector3.new(4, 4, 4), CFrame.new(cc + Vector3.new(x, 42, 18)), stone, Enum.Material.Slate) end
-        H.p(Vector3.new(26, 34, 22), CFrame.new(cc + Vector3.new(0, 57, -4)), stone, Enum.Material.Slate)
+        H.castle = cc
+        H.p(Vector3.new(40, 40, 80), CFrame.new(cc + Vector3.new(0, 20, 0)), stone, Enum.Material.Slate)
+        for z = -36, 36, 8 do H.p(Vector3.new(4, 4, 4), CFrame.new(cc + Vector3.new(-18, 42, z)), stone, Enum.Material.Slate) end
+        H.p(Vector3.new(22, 34, 26), CFrame.new(cc + Vector3.new(4, 57, 0)), stone, Enum.Material.Slate)
         for k = 0, 4 do
             local w = 28 - k * 6
-            H.p(Vector3.new(w, 4, w * 0.8), CFrame.new(cc + Vector3.new(0, 76 + k * 4, -4)), dark, Enum.Material.Slate)
+            H.p(Vector3.new(w * 0.8, 4, w), CFrame.new(cc + Vector3.new(4, 76 + k * 4, 0)), dark, Enum.Material.Slate)
         end
-        for _, tx in ipairs({-46, 46}) do
-            H.p(Vector3.new(70, 18, 18), CFrame.new(cc + Vector3.new(tx, 35, 0)) * up, stone, Enum.Material.Slate, nil, cyl)
+        for _, tz in ipairs({-46, 46}) do
+            H.p(Vector3.new(70, 18, 18), CFrame.new(cc + Vector3.new(0, 35, tz)) * up, stone, Enum.Material.Slate, nil, cyl)
             for k = 0, 4 do
                 local w = 20 - k * 4
-                H.p(Vector3.new(4, w, w), CFrame.new(cc + Vector3.new(tx, 72 + k * 4, 0)) * up, dark, Enum.Material.Slate, nil, cyl)
+                H.p(Vector3.new(4, w, w), CFrame.new(cc + Vector3.new(0, 72 + k * 4, tz)) * up, dark, Enum.Material.Slate, nil, cyl)
             end
-            H.p(Vector3.new(3, 5, 0.4), CFrame.new(cc + Vector3.new(tx, 52, 9.1)), win, Enum.Material.Neon)
-            H.p(Vector3.new(3, 5, 0.4), CFrame.new(cc + Vector3.new(tx, 36, 9.1)), win, Enum.Material.Neon)
+            H.p(Vector3.new(0.4, 5, 3), CFrame.new(cc + Vector3.new(-9.1, 52, tz)), win, Enum.Material.Neon)
+            H.p(Vector3.new(0.4, 5, 3), CFrame.new(cc + Vector3.new(-9.1, 36, tz)), win, Enum.Material.Neon)
         end
-        for _, wx in ipairs({-26, -13, 13, 26}) do
-            for _, wy in ipairs({16, 30}) do H.p(Vector3.new(3, 5, 0.4), CFrame.new(cc + Vector3.new(wx, wy, 20.2)), win, Enum.Material.Neon) end
+        for _, wz in ipairs({-26, -13, 13, 26}) do
+            for _, wy in ipairs({16, 30}) do H.p(Vector3.new(0.4, 5, 3), CFrame.new(cc + Vector3.new(-20.2, wy, wz)), win, Enum.Material.Neon) end
         end
-        H.p(Vector3.new(4, 6, 0.4), CFrame.new(cc + Vector3.new(0, 58, 7.2)), Color3.fromRGB(90, 255, 120), Enum.Material.Neon)
-        H.p(Vector3.new(14, 18, 1), CFrame.new(cc + Vector3.new(0, 9, 20.3)), Color3.fromRGB(15, 12, 18), Enum.Material.Wood)
+        H.p(Vector3.new(0.4, 6, 4), CFrame.new(cc + Vector3.new(-7.2, 58, 0)), Color3.fromRGB(90, 255, 120), Enum.Material.Neon)
+        H.p(Vector3.new(1, 18, 14), CFrame.new(cc + Vector3.new(-20.3, 9, 0)), Color3.fromRGB(15, 12, 18), Enum.Material.Wood)
         -- lua vermelha
-        H.p(Vector3.new(90, 90, 90), CFrame.new(C + Vector3.new(-260, 330, -620)), Color3.fromRGB(210, 50, 40), Enum.Material.Neon, nil, Enum.PartType.Ball)
-        -- arvores secas, tumulos e aboboras (longe dos ninhos, do caminho e do portal)
+        H.p(Vector3.new(90, 90, 90), CFrame.new(P(L + 450, 300, -260)), Color3.fromRGB(210, 50, 40), Enum.Material.Neon, nil, Enum.PartType.Ball)
+        -- ninhos: 2 fileiras, dos dois lados da estrada
         local nestPos = {}
-        for i = 1, 8 do
-            local a = math.rad((i - 1) * 45 + 22.5)
-            table.insert(nestPos, C + Vector3.new(math.cos(a) * 125, 0, math.sin(a) * 125))
+        for _, dx in ipairs({110, 190, 310, 390}) do
+            for _, dz in ipairs({-62, 62}) do table.insert(nestPos, P(dx, 0, dz)) end
         end
-        local function freeSpot(minR, maxR)
+        local function freeSpot()
             for _ = 1, 30 do
-                local a, d = R:NextNumber() * math.pi * 2, R:NextNumber(minR, maxR)
-                local p = C + Vector3.new(math.cos(a) * d, 0, math.sin(a) * d)
-                local ok = not (math.abs(p.X - C.X) < 14 and p.Z > C.Z) and (p - (C + Vector3.new(0, 0, 200))).Magnitude > 24
+                local p = P(R:NextNumber(15, L - 75), 0, R:NextNumber(-W + 8, W - 8))
+                local ok = math.abs(p.Z - G.Z) > 14 and (p - P(250, 0, 0)).Magnitude > 38
                 for _, np in ipairs(nestPos) do if (np - p).Magnitude < 16 then ok = false break end end
                 if ok then return p end
             end
-            return C + Vector3.new(0, 0, -200)
+            return P(L - 90, 0, W - 20)
         end
-        for _ = 1, lite and 8 or 16 do H.tree(freeSpot(45, 215), R:NextNumber(14, 24), R) end
-        for _ = 1, lite and 14 or 30 do H.grave(freeSpot(40, 210), R) end
+        for _ = 1, lite and 8 or 18 do H.tree(freeSpot(), R:NextNumber(14, 24), R) end
+        for _ = 1, lite and 14 or 32 do H.grave(freeSpot(), R) end
         for i = 1, lite and 10 or 18 do
-            local p = freeSpot(30, 215)
+            local p = freeSpot()
             local s = R:NextNumber(1.3, 2.8)
             local m = H.pumpkin(CFrame.new(p + Vector3.new(0, 1 * s, 0)) * CFrame.Angles(0, R:NextNumber() * 6.28, 0), s,
                 Color3.fromRGB(255, 120, 15), Color3.fromRGB(255, 200, 60), i % 2 == 0)
             m.Parent = H.world
         end
-        -- postes com lanterna no caminho
-        for _, x in ipairs({-11, 11}) do
-            for z = 40, 180, 35 do
-                local b = C + Vector3.new(x, 0, z)
-                H.p(Vector3.new(0.5, 9, 0.5), CFrame.new(b + Vector3.new(0, 4.5, 0)), Color3.fromRGB(20, 20, 24), Enum.Material.Metal)
+        -- postes com lanterna dos dois lados da estrada
+        for _, z in ipairs({-11, 11}) do
+            for x = 30, L - 70, 45 do
+                local b = P(x, 0, z)
+                H.p(Vector3.new(0.5, 9, 0.5), CFrame.new(b + Vector3.new(0, 4.5, 0)), iron, Enum.Material.Metal)
                 local lamp = H.p(Vector3.new(1.4, 1.4, 1.4), CFrame.new(b + Vector3.new(0, 9.4, 0)), Color3.fromRGB(255, 150, 50), Enum.Material.Neon, nil, Enum.PartType.Ball)
                 local l = Instance.new("PointLight"); l.Color = Color3.fromRGB(255, 150, 60); l.Brightness = 2; l.Range = 22; l.Parent = lamp
             end
         end
-        -- velas em volta da cama do guardiao (meio)
+        -- velas em volta da cama do guardiao (meio da area)
         for k = 1, 12 do
             local a = k / 12 * math.pi * 2
-            local b = C + Vector3.new(math.cos(a) * 18, 0, math.sin(a) * 18)
+            local b = P(250 + math.cos(a) * 18, 0, math.sin(a) * 18)
             H.p(Vector3.new(0.5, 1.4, 0.5), CFrame.new(b + Vector3.new(0, 0.7, 0)), Color3.fromRGB(235, 230, 215), Enum.Material.SmoothPlastic)
             local fl = H.p(Vector3.new(0.3, 0.5, 0.3), CFrame.new(b + Vector3.new(0, 1.65, 0)), Color3.fromRGB(120, 255, 140), Enum.Material.Neon)
             if k % 3 == 0 then local l = Instance.new("PointLight"); l.Color = Color3.fromRGB(120, 255, 140); l.Range = 12; l.Brightness = 1.5; l.Parent = fl end
         end
         -- neblina rasteira
         for _ = 1, lite and 3 or 7 do
-            local p = freeSpot(0, 190)
-            local fp = H.p(Vector3.new(60, 1, 60), CFrame.new(p + Vector3.new(0, 1.5, 0)), Color3.new(1, 1, 1))
+            local fp = H.p(Vector3.new(60, 1, 60), CFrame.new(freeSpot() + Vector3.new(0, 1.5, 0)), Color3.new(1, 1, 1))
             fp.Transparency = 1
             local e = Instance.new("ParticleEmitter")
             e.Texture = "rbxasset://textures/particles/smoke_main.dds"; e.Color = ColorSequence.new(Color3.fromRGB(150, 140, 170))
@@ -4055,32 +4120,31 @@ do
         end
         -- almas flutuando
         for i = 1, lite and 6 or 12 do
-            local b = freeSpot(20, 200) + Vector3.new(0, R:NextNumber(3, 9), 0)
+            local b = freeSpot() + Vector3.new(0, R:NextNumber(3, 9), 0)
             local w = H.p(Vector3.new(0.7, 0.7, 0.7), CFrame.new(b), (i % 2 == 0) and Color3.fromRGB(120, 255, 220) or Color3.fromRGB(140, 255, 140), Enum.Material.Neon, nil, Enum.PartType.Ball)
             local l = Instance.new("PointLight"); l.Color = w.Color; l.Range = 7; l.Brightness = 1.2; l.Parent = w
             table.insert(H.wisps, {p = w, base = b, s = R:NextNumber(0.4, 0.9), ph = R:NextNumber() * 6.28})
         end
-        -- morcegos voando em volta do castelo
+        -- morcegos voando (castelo e meio da area)
         for i = 1, lite and 7 or 14 do
             local bl = Color3.fromRGB(15, 12, 18)
             table.insert(H.bats, {
                 body = H.p(Vector3.new(0.6, 0.4, 0.9), CFrame.new(cc), bl),
                 wl = H.p(Vector3.new(1.4, 0.1, 0.8), CFrame.new(cc), bl),
                 wr = H.p(Vector3.new(1.4, 0.1, 0.8), CFrame.new(cc), bl),
-                c = (i % 3 == 0) and C or cc, r = R:NextNumber(25, 70), h = R:NextNumber(30, 70),
+                c = (i % 3 == 0) and P(250, 0, 0) or cc, r = R:NextNumber(25, 70), h = R:NextNumber(30, 70),
                 sp = R:NextNumber(0.4, 0.9) * (i % 2 == 0 and 1 or -1), ph = R:NextNumber() * 6.28,
             })
         end
-        -- ninhos
-        for _, pos in ipairs(nestPos) do
-            table.insert(H.nests, {pos = pos, ring = H.nest(pos)})
-        end
-        -- portal de saida
-        H.exitPos = C + Vector3.new(0, 0, 200)
-        local pc = C + Vector3.new(0, 8, 200)
-        H.makePortal(CFrame.lookAt(pc, C + Vector3.new(0, 8, 0)), H.world, "🚪 SAÍDA\nleve o ovo até aqui")
+        for _, pos in ipairs(nestPos) do table.insert(H.nests, {pos = pos, ring = H.nest(pos)}) end
         H.building = false
         for _, n in ipairs(H.nests) do H.fillNest(n) end
+        H.world.Parent = folder
+        H.hideEndWalls()
+    end
+    function H.gateText()
+        if (sim.speed or 0) >= H.req then return "⚡ " .. fmtMoney(H.req) .. " de velocidade ✅  •  entre!" end
+        return "🔒 Precisa de " .. fmtMoney(H.req) .. " de velocidade (você tem " .. fmtMoney(sim.speed or 0) .. ")"
     end
 
     -- ---------- ovos nos ninhos ----------
@@ -4119,7 +4183,7 @@ do
         end
     end
 
-    -- ---------- luz da noite (so na sua tela) ----------
+    -- ---------- luz da noite (so na sua tela, so dentro da area) ----------
     function H.setLight(on)
         local L = game:GetService("Lighting")
         if on then
@@ -4132,9 +4196,9 @@ do
             pcall(function()
                 L.ClockTime = 0; L.Brightness = 1.2; L.ExposureCompensation = 0
                 L.Ambient = Color3.fromRGB(70, 45, 80); L.OutdoorAmbient = Color3.fromRGB(80, 55, 95)
-                L.FogColor = Color3.fromRGB(35, 22, 45); L.FogStart = 40; L.FogEnd = 420
+                L.FogColor = Color3.fromRGB(35, 22, 45); L.FogStart = 40; L.FogEnd = 520
                 local a = H.oldAtm and H.oldAtm[1]
-                if a and a.Parent then a.Density = 0.42; a.Color = Color3.fromRGB(110, 70, 130); a.Decay = Color3.fromRGB(60, 25, 50); a.Haze = 2.2; a.Glare = 0 end
+                if a and a.Parent then a.Density = 0.38; a.Color = Color3.fromRGB(110, 70, 130); a.Decay = Color3.fromRGB(60, 25, 50); a.Haze = 2; a.Glare = 0 end
             end)
         elseif H.oldLight then
             for k, v in pairs(H.oldLight) do pcall(function() L[k] = v end) end
@@ -4144,7 +4208,7 @@ do
         end
     end
 
-    -- ---------- tela (HUD) ----------
+    -- ---------- tela (HUD) dentro da area ----------
     function H.makeHud()
         if H.hud then H.hud:Destroy() end
         local sg = Instance.new("ScreenGui")
@@ -4178,7 +4242,6 @@ do
         u.msg = lbl(sg, UDim2.fromOffset(620, 24), UDim2.new(0.5, 0, 0, 40), "", 16, Color3.new(1, 1, 1), Vector2.new(0.5, 0))
         u.msg.TextWrapped = true
         u.info = lbl(sg, UDim2.fromOffset(420, 20), UDim2.new(0.5, 0, 0, 66), "", 13, Color3.fromRGB(210, 195, 230), Vector2.new(0.5, 0))
-        u.exit = btn("🚪 Sair", UDim2.fromOffset(110, 40), UDim2.new(1, -12, 0, 60), Vector2.new(1, 0), Color3.fromRGB(60, 25, 35), function() H.exit() end)
         u.act = btn("", UDim2.fromOffset(230, 58), UDim2.new(0.5, 0, 1, -120), Vector2.new(0.5, 1), Color3.fromRGB(40, 20, 50), function()
             if H.actionShown == "grab" then H.tryGrab() elseif H.actionShown == "atk" then H.attack() end
         end)
@@ -4228,7 +4291,7 @@ do
             u.bossTxt.Text = "👑 Cavaleiro Sem Cabeça   " .. math.max(0, math.floor(b.hp)) .. " / " .. b.max
         end
         local left = H.bossAt and math.max(0, H.bossAt - tick()) or 0
-        u.info.Text = (H.carry and ("🥚 Carregando: " .. H.carry.pet .. "   •   ") or "")
+        u.info.Text = (H.carry and ("🥚 " .. H.carry.pet .. ": volte pelo portão e leve até a sua base   •   ") or "")
             .. (b and "⚔️ O chefe está na área!" or string.format("👑 Cavaleiro em %d:%02d", math.floor(left / 60), math.floor(left % 60)))
     end
     function H.shake(t)
@@ -4248,8 +4311,24 @@ do
         pcall(GK.arc, a, b, 0.35)
         GK.BOLT_COLORS = old
     end
+    -- aviso rapido fora da area (quando esta levando o ovo pra base)
+    function H.toast(text, secs)
+        pcall(function()
+            if H.toastGui then H.toastGui:Destroy() end
+            local sg = Instance.new("ScreenGui")
+            sg.Name = "NS22AssombradaAviso"; sg.ResetOnSpawn = false; sg.DisplayOrder = 40
+            local okp = pcall(function() sg.Parent = (gethui and gethui()) or game:GetService("CoreGui") end)
+            if not okp or not sg.Parent then sg.Parent = LP:WaitForChild("PlayerGui") end
+            local l = Instance.new("TextLabel", sg)
+            l.AnchorPoint = Vector2.new(0.5, 0); l.Position = UDim2.new(0.5, 0, 0, 40); l.Size = UDim2.fromOffset(620, 28)
+            l.BackgroundTransparency = 1; l.Font = Enum.Font.GothamBlack; l.TextSize = 18; l.TextColor3 = Color3.fromRGB(255, 170, 60)
+            l.TextStrokeTransparency = 0.3; l.Text = text
+            H.toastGui = sg
+            if secs then task.delay(secs, function() if H.toastGui == sg then sg:Destroy(); H.toastGui = nil end end) end
+        end)
+    end
 
-    -- ---------- roubar / carregar / entregar ----------
+    -- ---------- roubar / carregar ----------
     function H.tryGrab()
         if not H.inside or H.carry or H.grab then return end
         local n = H.nearNest(9)
@@ -4265,7 +4344,7 @@ do
         n.egg = nil
         n.ring.Color = Color3.fromRGB(60, 50, 70)
         n.respawn = tick() + 25
-        H.msg("🥚 Pegou " .. n.pet .. "! Corre pro portal de saída!", 3)
+        H.msg("🥚 Pegou " .. n.pet .. "! Volte pelo portão e leve até a sua base!", 3)
     end
     function H.loseCarry()
         local c = H.carry; if not c then return end
@@ -4274,24 +4353,46 @@ do
         pcall(function() c.egg:Destroy() end)
         if c.nest and not c.nest.egg then H.fillNest(c.nest, c.pet, c.mut) end
     end
-    function H.deliver()
-        local c = H.carry; if not c then return end
-        H.carry = nil
-        if c.stopArms then pcall(c.stopArms) end
-        local ok = false
-        pcall(function() ok = GK.buyEgg(c.pet, c.egg) end)
-        if ok then
-            H.data.stolen = (H.data.stolen or 0) + 1
-            H.save()
-            H.msg("🎃 " .. c.pet .. (c.mut and " ✦Spectral" or "") .. " foi pra sua base! Vai chocar lá.", 4)
-            pcall(GK.sound, GK.SND_PLACE, H.exitPos, 1)
-        else
-            pcall(function() c.egg:Destroy() end)
-            if c.nest and not c.nest.egg then H.fillNest(c.nest, c.pet, c.mut) end
-            H.msg("❌ Base não encontrada ou cheia (aba Base → 📍 Minha base é aqui)", 5)
+    -- saiu da area com o ovo: agora SEU personagem leva o ovo ate a base (igual ao jogo)
+    function H.startRealCarry(c)
+        local ch = LP.Character
+        c.nest = nil
+        c.stopArms = ch and holdArms(ch) or nil
+        H.realCarry = c
+        H.toast("🥚 Leve o " .. c.pet .. " até a sua base!")
+        c.conn = RunService.Heartbeat:Connect(function()
+            local chr = LP.Character
+            local r = chr and chr:FindFirstChild("HumanoidRootPart")
+            if not r or not c.egg.Parent or not alive() then H.stopRealCarry(false) return end
+            local hp = handsPoint(chr, r) + Vector3.new(0, 0.3, 0)
+            local lk = Vector3.new(r.CFrame.LookVector.X, 0, r.CFrame.LookVector.Z)
+            c.egg:PivotTo(CFrame.lookAt(hp, hp + (lk.Magnitude > 0.01 and lk.Unit or Vector3.new(1, 0, 0))))
+            local pl = myPlot()
+            local cp = pl and pl:FindFirstChild("CenterPoint")
+            if cp and Vector3.new(cp.Position.X - r.Position.X, 0, cp.Position.Z - r.Position.Z).Magnitude < 70 then H.stopRealCarry(true) end
+        end)
+        if not myPlot() then H.stopRealCarry(true) end
+    end
+    function H.stopRealCarry(mode)    -- true = entrega | false = perde | "transfer" = volta pra copia
+        local c = H.realCarry; if not c then return end
+        H.realCarry = nil
+        pcall(function() c.conn:Disconnect() end)
+        if c.stopArms then pcall(c.stopArms); c.stopArms = nil end
+        if H.toastGui then pcall(function() H.toastGui:Destroy() end); H.toastGui = nil end
+        if mode == "transfer" then return c end
+        if mode == true then
+            local ok = false
+            pcall(function() ok = GK.buyEgg(c.pet, c.egg) end)
+            if ok then
+                H.data.stolen = (H.data.stolen or 0) + 1
+                H.save()
+                H.toast("🎃 " .. c.pet .. (c.mut and " ✦Spectral" or "") .. " chegou na sua base! Vai chocar.", 4)
+                pcall(GK.sound, GK.SND_PLACE, c.egg:GetPivot().Position, 1)
+                return
+            end
+            H.toast("❌ Base não encontrada ou cheia (aba Base → 📍 Minha base é aqui)", 5)
         end
-        H.portalArmed = false
-        H.resetGuard(true)
+        pcall(function() c.egg:Destroy() end)
     end
 
     -- ---------- guardiao: Ceifador (dorme no meio, acorda quando voce rouba) ----------
@@ -4306,7 +4407,7 @@ do
         measure(ms)
         rescale(ms, 2.6)
         playAnim(m, "Ceifador", ms)
-        local g = {model = m, ms = ms, home = H.C + Vector3.new(0, 0, -6), state = "sleep", look = Vector3.new(0, 0, 1)}
+        local g = {model = m, ms = ms, home = H.G + Vector3.new(250, 0, 0), state = "sleep", look = Vector3.new(-1, 0, 0)}
         g.pos = g.home
         local bb = Instance.new("BillboardGui")
         bb.Size = UDim2.fromOffset(170, 40); bb.AlwaysOnTop = true; bb.MaxDistance = 180
@@ -4324,7 +4425,7 @@ do
     end
     function H.placeGuard(bob)
         local g = H.guard; if not g then return end
-        local c = Vector3.new(g.pos.X, H.C.Y + g.ms.size.Y / 2 + (bob or 0), g.pos.Z)
+        local c = Vector3.new(g.pos.X, H.G.Y + g.ms.size.Y / 2 + (bob or 0), g.pos.Z)
         g.model:PivotTo(CFrame.new(c) * CFrame.lookAt(Vector3.zero, g.look) * g.ms.centerToPivot)
     end
     function H.wakeGuard()
@@ -4343,7 +4444,7 @@ do
             g.state = "return"
             g.label.Text = "😴 voltando..."; g.label.TextColor3 = Color3.fromRGB(200, 200, 220)
         else
-            g.state = "sleep"; g.pos = g.home; g.look = Vector3.new(0, 0, 1)
+            g.state = "sleep"; g.pos = g.home; g.look = Vector3.new(-1, 0, 0)
             g.label.Text = "💤 Ceifador"; g.label.TextColor3 = Color3.new(1, 1, 1)
             if g.ms.trWalk then g.ms.trWalk:Stop(0.3) end
             if g.ms.trIdle then g.ms.trIdle:Play(0.3); g.ms.trIdle:AdjustSpeed(0.4) end
@@ -4378,7 +4479,7 @@ do
         H.placeGuard(bob)
     end
 
-    -- ---------- chefe: Cavaleiro Sem Cabeca ----------
+    -- ---------- chefe: Cavaleiro Sem Cabeca (sai do castelo) ----------
     function H.spawnBoss()
         local I = H.inside; if not I or H.boss then return end
         local src = H.source("Cavaleiro Sem Cabeça"); if not src then return end
@@ -4392,19 +4493,20 @@ do
         playAnim(m, "Cavaleiro Sem Cabeça", ms)
         if ms.trIdle then ms.trIdle:Stop(0) end
         if ms.trWalk then ms.trWalk:Play(0.2) end
-        local b = {model = m, ms = ms, hp = 3000, max = 3000, pos = H.C + Vector3.new(0, 0, -150), look = Vector3.new(0, 0, 1), nextAtk = tick() + 4, phase = "walk"}
+        local b = {model = m, ms = ms, hp = 3000, max = 3000, pos = H.G + Vector3.new(H.LEN - 80, 0, 0), look = Vector3.new(-1, 0, 0),
+            nextAtk = tick() + 4, phase = "walk"}
         local hl = Instance.new("Highlight")
         hl.FillColor = Color3.new(1, 1, 1); hl.FillTransparency = 1; hl.OutlineColor = Color3.fromRGB(60, 255, 200); hl.Adornee = m; hl.Parent = m
         b.hl = hl
         H.boss = b
         shockwave(b.pos + Vector3.new(0, 0.5, 0))
         for _ = 1, 6 do H.greenArc(b.pos + Vector3.new(0, 30, 0), b.pos + Vector3.new(math.random(-12, 12), 0.5, math.random(-12, 12))) end
-        H.msg("👑 O CAVALEIRO SEM CABEÇA apareceu! Ataque com Q / ⚔️", 4)
+        H.msg("👑 O CAVALEIRO SEM CABEÇA saiu do castelo! Ataque com Q / ⚔️", 4)
         H.placeBoss(0)
     end
     function H.placeBoss(extraY)
         local b = H.boss; if not b then return end
-        local c = Vector3.new(b.pos.X, H.C.Y + b.ms.size.Y / 2 + (extraY or 0), b.pos.Z)
+        local c = Vector3.new(b.pos.X, H.G.Y + b.ms.size.Y / 2 + (extraY or 0), b.pos.Z)
         b.model:PivotTo(CFrame.new(c) * CFrame.lookAt(Vector3.zero, b.look) * b.ms.centerToPivot)
     end
     function H.despawnBoss()
@@ -4429,8 +4531,8 @@ do
                 b.t0 = tick()
                 if math.random() < 0.55 then
                     b.phase = "aim"
-                    b.target = Vector3.new(I.pos.X, H.C.Y, I.pos.Z)
-                    b.mark = H.p(Vector3.new(0.2, 16, 16), CFrame.new(b.target + Vector3.new(0, 0.12, 0)) * CFrame.Angles(0, 0, math.rad(90)),
+                    b.target = Vector3.new(I.pos.X, H.G.Y, I.pos.Z)
+                    b.mark = H.p(Vector3.new(0.2, 16, 16), CFrame.new(b.target + Vector3.new(0, 0.15, 0)) * CFrame.Angles(0, 0, math.rad(90)),
                         Color3.fromRGB(255, 40, 40), Enum.Material.Neon, H.world, Enum.PartType.Cylinder)
                     b.mark.Transparency = 0.4
                 else
@@ -4510,7 +4612,7 @@ do
         H.boss = nil
         if b.mark then pcall(function() b.mark:Destroy() end) end
         local c = (b.model:GetPivot() * b.ms.centerToPivot:Inverse()).Position
-        for i = 1, 3 do task.delay(i * 0.12, function() shockwave(Vector3.new(c.X, H.C.Y + 0.5, c.Z)) end) end
+        for i = 1, 3 do task.delay(i * 0.12, function() shockwave(Vector3.new(c.X, H.G.Y + 0.5, c.Z)) end) end
         for _ = 1, 10 do H.greenArc(c, c + Vector3.new(math.random(-25, 25), math.random(-5, 20), math.random(-25, 25))) end
         task.spawn(function()
             for i = 1, 10 do
@@ -4530,7 +4632,7 @@ do
         H.bossAt = tick() + 240
     end
 
-    -- ---------- cenario vivo (almas, morcegos, ninhos, luz) ----------
+    -- ---------- cenario vivo (almas, morcegos, ninhos) ----------
     function H.ambient()
         local t = tick()
         for _, w in ipairs(H.wisps) do
@@ -4546,15 +4648,15 @@ do
             b.wl.CFrame = cf * CFrame.new(-0.3, 0, 0) * CFrame.Angles(0, 0, f) * CFrame.new(-0.7, 0, 0)
             b.wr.CFrame = cf * CFrame.new(0.3, 0, 0) * CFrame.Angles(0, 0, -f) * CFrame.new(0.7, 0, 0)
         end
-        if t - (H.lastLight or 0) > 0.5 then H.lastLight = t; H.setLight(true) end
         for _, n in ipairs(H.nests) do
             if not n.egg and n.respawn and t >= n.respawn and not (H.carry and H.carry.nest == n) then H.fillNest(n) end
         end
     end
 
-    -- ---------- entrar / sair / controlar a copia ----------
-    function H.enter()
+    -- ---------- entrar (passou do portao) / sair (voltou pelo portao) ----------
+    function H.enter(startPos)
         if H.inside then return true end
+        if H.entering then return false, "carregando a área..." end
         if tripBusy then return false, "termine o roubo/corrida antes" end
         if (sim.speed or 0) < H.req then
             return false, "Precisa de " .. fmtMoney(H.req) .. " ⚡ (você tem " .. fmtMoney(sim.speed or 0) .. ")"
@@ -4565,10 +4667,12 @@ do
         local rh = ch and ch:FindFirstChild("HumanoidRootPart")
         local rhum = ch and ch:FindFirstChildOfClass("Humanoid")
         if not rh or not rhum then return false, "sem personagem" end
-        if H.entering then return false, "carregando a área..." end
         if not H.world then
             H.entering = true
-            local ok, err = pcall(H.build)
+            local ok, err = pcall(function()
+                if not H.G then H.locate(true) end
+                H.build()
+            end)
             H.building, H.entering = false, false
             if not ok then
                 if H.world then pcall(function() H.world:Destroy() end) end
@@ -4576,11 +4680,14 @@ do
                 return false, "erro ao montar a área: " .. tostring(err)
             end
         end
-        H.world.Parent = folder
         local av, hum, hrp = makeAvatar()
         if not av then return false, "não deu pra copiar você" end
+        local G = H.G
+        local sp = startPos or (G + Vector3.new(6, 0, 0))
+        local lk = Vector3.new(rh.CFrame.LookVector.X, 0, rh.CFrame.LookVector.Z)
         local I = {av = av, hum = hum, hrp = hrp, rh = rh, rhum = rhum, fov = Camera.FieldOfView,
-            pos = H.C + Vector3.new(0, 0, 178), look = Vector3.new(0, 0, -1), hopY = 0, hopV = 0, kb = Vector3.zero}
+            pos = Vector3.new(math.max(sp.X, G.X - 10), G.Y, math.clamp(sp.Z, G.Z - H.OPEN + 2, G.Z + H.OPEN - 2)),
+            look = (startPos and lk.Magnitude > 0.1) and lk.Unit or Vector3.new(1, 0, 0), hopY = 0, hopV = 0, kb = Vector3.zero}
         H.inside = I
         tripBusy = true
         rh.Anchored = true
@@ -4589,9 +4696,11 @@ do
         H.setLight(true)
         pcall(H.makeHud)
         pcall(H.spawnGuard)
-        H.bossAt = tick() + 240
-        H.portalArmed = true
+        H.bossAt = H.bossAt and math.max(H.bossAt, tick() + 30) or (tick() + 240)
         avPlay(hum, "idle")
+        -- trouxe um ovo de volta pra dentro? continua na mao da copia
+        local rc = H.stopRealCarry("transfer")
+        if rc then H.carry = {egg = rc.egg, pet = rc.pet, mut = rc.mut, stopArms = holdArms(av)} end
         local warned = false
         I.conn = RunService.Heartbeat:Connect(function(dt)
             local ok, e = pcall(H.step, dt)
@@ -4601,18 +4710,20 @@ do
             if gp then return end
             if io.KeyCode == Enum.KeyCode.E then H.tryGrab() elseif io.KeyCode == Enum.KeyCode.Q then H.attack() end
         end)
-        H.msg("🎃 Bem-vindo! Roube um ovo-abóbora (E) e leve até o portal de saída.", 5)
+        H.msg("🎃 Dimensão Assombrada! Roube um ovo-abóbora (E) e volte pelo portão.", 5)
         return true
     end
-    function H.exit()
+    function H.exit(keepEgg)
         local I = H.inside; if not I then return end
         H.inside = nil
         pcall(function() I.conn:Disconnect() end)
         pcall(function() I.keys:Disconnect() end)
-        H.loseCarry()
         H.grab = nil
+        local c = H.carry
+        H.carry = nil
+        if c and c.stopArms then pcall(c.stopArms); c.stopArms = nil end
         H.despawnBoss()
-        if H.guard then pcall(function() H.guard.model:Destroy() end); H.guard = nil end
+        H.resetGuard(false)
         pcall(function() I.av:Destroy() end)
         if H.hud then H.hud:Destroy(); H.hud = nil; H.ui = nil end
         H.setLight(false)
@@ -4621,13 +4732,21 @@ do
         local hum = LP.Character and LP.Character:FindFirstChildOfClass("Humanoid")
         if hum then Camera.CameraSubject = hum end
         Camera.FieldOfView = I.fov
-        if H.world then H.world.Parent = nil end
         tripBusy = false
         H.armed = false
+        if c then
+            if keepEgg and LP.Character then
+                H.startRealCarry(c)
+            else
+                pcall(function() c.egg:Destroy() end)
+                if c.nest and not c.nest.egg then H.fillNest(c.nest, c.pet, c.mut) end
+            end
+        end
     end
     function H.step(dt)
         local I = H.inside; if not I then return end
-        if not alive() or not I.av.Parent or not I.rhum.Parent or not I.rh.Parent or I.rhum.Health <= 0 then H.exit() return end
+        if not alive() or not I.av.Parent or not I.rhum.Parent or not I.rh.Parent or I.rhum.Health <= 0 then H.exit(false) return end
+        local G = H.G
         local md = Vector3.new(I.rhum.MoveDirection.X, 0, I.rhum.MoveDirection.Z)
         local mv = md.Magnitude > 0.1
         local spd = I.rhum.WalkSpeed > 0 and I.rhum.WalkSpeed or 16
@@ -4643,27 +4762,33 @@ do
         else
             I.kb = Vector3.zero
         end
-        local off = Vector3.new(I.pos.X - H.C.X, 0, I.pos.Z - H.C.Z)
-        if off.Magnitude > H.R then I.pos = Vector3.new(H.C.X, I.pos.Y, H.C.Z) + off.Unit * H.R end
+        -- limites: cerca dos lados/fundo; a frente so abre no portao (por onde se volta pro mapa)
+        local dx, dz = I.pos.X - G.X, I.pos.Z - G.Z
+        dz = math.clamp(dz, -H.HALF + 4, H.HALF - 4)
+        if dx > H.LEN - 6 then dx = H.LEN - 6 end
+        if dx < 1 then
+            -- no portao (ainda no chao do mapa): so dentro da passagem
+            dz = math.clamp(dz, -H.OPEN + 1, H.OPEN - 1)
+            if dx < -12 then
+                H.exit(true)      -- voltou pelo portao: seu personagem continua dali (com o ovo, se tiver)
+                return
+            end
+        end
+        I.pos = Vector3.new(G.X + dx, G.Y, G.Z + dz)
         if I.rhum.Jump and I.hopY <= 0 then I.hopV = 30; I.rhum.Jump = false end
         if I.hopY > 0 or I.hopV > 0 then
             I.hopY = I.hopY + I.hopV * dt; I.hopV = I.hopV - 95 * dt
             if I.hopY <= 0 then I.hopY, I.hopV = 0, 0 end
         end
         local hip = (I.hum.RigType == Enum.HumanoidRigType.R15) and (I.hum.HipHeight + I.hrp.Size.Y / 2) or 3
-        local p = Vector3.new(I.pos.X, H.C.Y + hip + I.hopY, I.pos.Z)
+        local p = Vector3.new(I.pos.X, G.Y + hip + I.hopY, I.pos.Z)
         I.hrp.CFrame = CFrame.lookAt(p, p + I.look)
         if mv ~= I.moving then I.moving = mv; avPlay(I.hum, mv and "run" or "idle") end
-        -- portal de saida: com ovo = entrega; sem ovo = sai da dimensao
-        local dp = Vector3.new(I.pos.X - H.exitPos.X, 0, I.pos.Z - H.exitPos.Z).Magnitude
-        if dp > 14 then H.portalArmed = true end
         H.action = nil
         if H.carry then
             local c = handsPoint(I.av, I.hrp) + Vector3.new(0, 0.3, 0)
             H.carry.egg:PivotTo(CFrame.lookAt(c, c + I.look))
-            if dp < 10 then H.deliver() end
         else
-            if dp < 6 and H.portalArmed then H.exit() return end
             local n = H.nearNest(9)
             if n then H.action = "grab" end
             if H.grab then
@@ -4679,55 +4804,53 @@ do
         H.guardStep(dt)
         H.bossStep(dt)
         H.ambient()
+        if tick() - (H.lastLight or 0) > 0.5 then H.lastLight = tick(); H.setLight(true) end
         if not H.boss and H.bossAt and tick() >= H.bossAt then H.spawnBoss() end
         H.updateHud()
     end
 
-    -- ---------- portal no mundo de verdade (depois da Enchanted Forest) ----------
-    function H.entryText() return "🎃 DIMENSÃO ASSOMBRADA\n⚡ precisa de " .. fmtMoney(H.req) .. " de velocidade" end
-    function H.buildEntry()
-        if H.entry and H.entry.Parent then return end
-        local mem = areaPosMem and areaPosMem["Enchanted Forest"]
-        local ef = (type(mem) == "table" and mem[3] and Vector3.new(mem[1], mem[2], mem[3])) or AREA_POS["Enchanted Forest"]
-        local rp = RaycastParams.new()
-        rp.FilterType = Enum.RaycastFilterType.Exclude
-        rp.FilterDescendantsInstances = {folder, LP.Character}
-        local base = ef + Vector3.new(140, 0, 0)
-        local hit = workspace:Raycast(base + Vector3.new(0, 80, 0), Vector3.new(0, -200, 0), rp)
-        if not hit then
-            base = ef + Vector3.new(60, 0, 0)
-            hit = workspace:Raycast(base + Vector3.new(0, 80, 0), Vector3.new(0, -200, 0), rp)
-        end
-        local y = hit and hit.Position.Y or ef.Y
-        local pos = Vector3.new(base.X, y + 8.5, base.Z)
-        H.entry, H.entryLabel = H.makePortal(CFrame.lookAt(pos, pos - Vector3.new(1, 0, 0)), folder, H.entryText())
-        H.p(Vector3.new(1, 18, 18), CFrame.new(Vector3.new(pos.X, y + 0.3, pos.Z)) * CFrame.Angles(0, 0, math.rad(90)),
-            Color3.fromRGB(40, 30, 50), Enum.Material.Slate, H.entry, Enum.PartType.Cylinder)
-        local beam = H.p(Vector3.new(220, 3, 3), CFrame.new(Vector3.new(pos.X, y + 110, pos.Z)) * CFrame.Angles(0, 0, math.rad(90)),
-            Color3.fromRGB(140, 60, 255), Enum.Material.Neon, H.entry, Enum.PartType.Cylinder)
-        beam.Transparency = 0.6
-        H.entryPos = pos
-    end
+    -- ---------- vigia: acha o fim do mapa, monta a area e troca pra copia no portao ----------
     task.spawn(function()
-        task.wait(4)
-        pcall(H.buildEntry)
-        H.armed = true
-        while task.wait(0.25) do
+        local pushT = 0
+        while task.wait(0.1) do
             if not alive() then
-                if H.inside then pcall(H.exit) end
+                if H.inside then pcall(H.exit, false) end
+                pcall(H.stopRealCarry, false)
+                if H.world then pcall(function() H.world:Destroy() end) end
                 break
             end
             local r = root()
-            if H.entryPos and r and not H.inside then
-                local d = (r.Position - H.entryPos).Magnitude
-                if d > 16 then
-                    H.armed = true
-                elseif d < 9 and H.armed then
-                    H.armed = false
-                    local ok, msg = H.enter()
-                    if not ok and H.entryLabel then
-                        H.entryLabel.Text = "🔒 " .. tostring(msg)
-                        task.delay(4, function() if H.entryLabel then H.entryLabel.Text = H.entryText() end end)
+            local hum = LP.Character and LP.Character:FindFirstChildOfClass("Humanoid")
+            -- 1) chegou perto da Enchanted Forest: acha onde o chao acaba e monta a area colada ali
+            if r and not H.world and not H.entering and tick() - (H.lastLocate or 0) > 2 then
+                H.lastLocate = tick()
+                local ef = H.efPos()
+                if (r.Position - ef).Magnitude < 900 and H.locate(false) then
+                    H.entering = true
+                    local ok, err = pcall(H.build)
+                    H.building, H.entering = false, false
+                    if not ok then
+                        warn("[Assombrada] " .. tostring(err))
+                        if H.world then pcall(function() H.world:Destroy() end) end
+                        H.world, H.nests, H.wisps, H.bats = nil, {}, {}, {}
+                    end
+                end
+            end
+            if H.world and not H.inside then
+                -- cenario vivo quando voce esta por perto
+                if r and (r.Position - H.C).Magnitude < 900 then pcall(H.ambient) end
+                if H.gateLabel and tick() - (H.lastGateTxt or 0) > 2 then H.lastGateTxt = tick(); H.gateLabel.Text = H.gateText() end
+                -- 2) passou pelo portao (ou esta empurrando a parede do fim do mapa): a copia continua
+                if r and hum and not tripBusy and not H.entering then
+                    local lx, lz = r.Position.X - H.G.X, r.Position.Z - H.G.Z
+                    local inGate = math.abs(lz) < H.OPEN and math.abs(r.Position.Y - H.G.Y) < 14
+                    if lx < -60 or not inGate then H.armed = true end
+                    local pushing = inGate and lx > -45 and hum.MoveDirection.X > 0.5 and r.AssemblyLinearVelocity.X < 2
+                    pushT = pushing and (pushT + 0.1) or 0
+                    if H.armed and inGate and (lx > -10 or pushT > 0.4) then
+                        H.armed = false
+                        local ok, msg = H.enter(r.Position)
+                        if not ok and H.gateLabel then H.gateLabel.Text = "🔒 " .. tostring(msg) end
                     end
                 end
             end
@@ -5275,7 +5398,7 @@ end
 local function buildHub()
 local TS  = game:GetService("TweenService")
 local UIS = game:GetService("UserInputService")
-local VERSION = "v56"
+local VERSION = "v57"
 local pickResp
 
 if getgenv then
@@ -6386,8 +6509,8 @@ do
     local pg = newPage("Assombrada", "🎃", 8)
     section(pg, "🎃 Dimensão Assombrada")
     local st = note(pg, "")
-    local enterBtn = button(pg, "🎃 Entrar na Dimensão Assombrada", "main", function()
-        if H.inside then H.exit() return end
+    local enterBtn = button(pg, "🎃 Ir direto pra área nova (atalho)", "main", function()
+        if H.inside then H.exit(true) return end
         local ok, msg = H.enter()
         setStatus(ok and "🎃 Você entrou na Dimensão Assombrada!" or ("❌ " .. tostring(msg)))
     end)
@@ -6395,7 +6518,7 @@ do
         if not H.inside then setStatus("Entre na Dimensão Assombrada primeiro") return end
         H.spawnBoss()
     end)
-    local tip = note(pg, "Tem um PORTAL roxo no fim do mapa, depois da Enchanted Forest (ou use o botão acima). Lá dentro: E = roubar ovo-abóbora, Q = atacar o chefe (no celular, botão na tela). Leve o ovo até o portal de saída: ele vai pra sua base e choca um pet novo. Cuidado: o Ceifador acorda quando você rouba!")
+    local tip = note(pg, "A área nova fica no FIM DO MAPA: passe a Enchanted Forest e continue andando até o portão de pedra. Lá dentro: E = roubar ovo-abóbora, Q = atacar o chefe (no celular, botão na tela). Volte pelo portão e leve o ovo até a sua base, igual ao jogo. Cuidado: o Ceifador acorda quando você rouba!")
     tip.Size = UDim2.new(1, 0, 0, 58)
     section(pg, "📖 Índice dos pets assombrados")
     local cnt = note(pg, "")
@@ -6440,7 +6563,7 @@ do
             got, #rows, H.data.stolen or 0, H.data.bosses or 0)
         st.Text = string.format("⚡ Requisito: %s de velocidade   •   você tem %s %s", fmtMoney(H.req), fmtMoney(sim.speed or 0),
             (sim.speed or 0) >= H.req and "✅" or "🔒")
-        enterBtn.Text = H.inside and "🚪 Sair da Dimensão Assombrada" or "🎃 Entrar na Dimensão Assombrada"
+        enterBtn.Text = H.inside and "🚪 Sair da área (volta pro seu personagem)" or "🎃 Ir direto pra área nova (atalho)"
     end
     pcall(paint)
     task.spawn(function()
