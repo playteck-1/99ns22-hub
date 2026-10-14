@@ -617,6 +617,7 @@ local function spawnModel(src, label)
     layout()
     if s.home then s.model:PivotTo(s.home * s.centerToPivot) end
     s.animated = playAnim(m, label, s)
+    if GK and GK.applyMut then pcall(GK.applyMut, s) end
     return true, s
 end
 
@@ -1314,16 +1315,18 @@ end
 function GK.baseName(m, display)
     local am = RS:FindFirstChild("AssetModels")
     if not am then return end
+    -- conhece o pet pela pasta OU pela lista de pets do jogo (World Burner nao fica na pasta)
+    local function known(n) return am:FindFirstChild(n) or GK.info[n] end
     local p = m:GetAttribute("PreparedSourceName")
-    if type(p) == "string" and am:FindFirstChild(p) then return p end
+    if type(p) == "string" and known(p) then return p end
     if not display or display == "" then return end
-    if am:FindFirstChild(display) then return display end
+    if known(display) then return display end
     local rest = display
     while true do
         local nxt = rest:match("^%S+%s+(.+)$")
         if not nxt then return end
         rest = nxt
-        if am:FindFirstChild(rest) then return rest end
+        if known(rest) then return rest end
     end
 end
 function GK.scan()
@@ -1447,7 +1450,7 @@ function GK.tag(s)
         local l = bb:FindFirstChild(n)
         if l and l:IsA("TextLabel") then l.Text = txt; l.Visible = true return l end
     end
-    set("DisplayName", name or "Pet")
+    set("DisplayName", (s.mut and (s.mut .. " ") or "") .. (name or "Pet"))
     set("Rarity", "")
     local ps = set("PerSecond", "$" .. fmtMoney(s.income or 0) .. "/s")
     local od = set("Odds", e.rarity or "")
@@ -2295,8 +2298,9 @@ task.spawn(function()
             if not s.isEgg then
                 if not s.income then s.income = incomeFor(s.petName or (s.model.Name:gsub("^Visual_", ""))) end
                 if not s.tagLabel and s.home and not s.flying then pcall(addTag, s) end
-                if s.tagLabel then s.tagLabel.Text = s.tagIsData and ("$" .. fmtMoney(s.income) .. "/s") or ("💰 $" .. fmtMoney(s.income) .. "/s") end
-                total = total + s.income
+                local inc = s.income * ((not GK.incomeOverride and s.mutX) or 1)
+                if s.tagLabel then s.tagLabel.Text = s.tagIsData and ("$" .. fmtMoney(inc) .. "/s") or ("💰 $" .. fmtMoney(inc) .. "/s") end
+                total = total + inc
             end
         end
         total = total * GK.moneyMult()      -- passes da loja
@@ -3110,6 +3114,98 @@ do
     end
 end
 
+-- ===== 🧬 MUTACOES (Silver, Golden, Rainbow, Luminous...) - so na sua tela =====
+GK.mutMode = "Nenhuma"
+GK.MUT_ORDER = {"Nenhuma", "Sorteio do jogo", "Silver", "Golden", "Rainbow", "Luminous", "Fractured", "Scrambled", "Parasite", "Nitro"}
+GK.MUTS = {
+    Silver = {x = 1.2, paint = Color3.fromRGB(205, 212, 225), mat = Enum.Material.Metal, refl = 0.2},
+    Golden = {x = 2.5, paint = Color3.fromRGB(255, 196, 40), mat = Enum.Material.Metal, refl = 0.15, fx = Color3.fromRGB(255, 225, 120)},
+    Rainbow = {x = 3.5, paint = Color3.fromRGB(255, 80, 80), mat = Enum.Material.SmoothPlastic, rainbow = true, fx = Color3.new(1, 1, 1)},
+    Luminous = {x = 10, light = Color3.fromRGB(160, 240, 255), fx = Color3.fromRGB(170, 245, 255)},
+    Fractured = {x = 2.75, light = Color3.fromRGB(170, 90, 255), fx = Color3.fromRGB(190, 120, 255)},
+    Scrambled = {x = 2.75, light = Color3.fromRGB(90, 255, 120), fx = Color3.fromRGB(110, 255, 140)},
+    Parasite = {x = 3, light = Color3.fromRGB(255, 50, 60), fx = Color3.fromRGB(150, 20, 30)},
+    Nitro = {x = 3, light = Color3.fromRGB(60, 160, 255), fx = Color3.fromRGB(80, 170, 255), flame = true},
+}
+do
+    local function pick()
+        local m = GK.mutMode
+        if m == "Sorteio do jogo" then      -- chances do jogo: Silver 6%, Golden 4%, Rainbow 1%
+            local r = math.random(100)
+            return (r <= 1 and "Rainbow") or (r <= 5 and "Golden") or (r <= 11 and "Silver") or nil
+        end
+        return GK.MUTS[m] and m or nil
+    end
+    local function paint(s, def)
+        local parts = {}
+        for _, d in ipairs(s.model:GetDescendants()) do
+            if d:IsA("SurfaceAppearance") or d:IsA("Decal") or d:IsA("Texture") then d:Destroy()
+            elseif d:IsA("SpecialMesh") then d.TextureId = ""
+            elseif d:IsA("MeshPart") and d.Transparency < 0.95 then d.TextureID = ""; table.insert(parts, d)
+            elseif d:IsA("BasePart") and d.Transparency < 0.95 then table.insert(parts, d) end
+        end
+        for _, d in ipairs(parts) do d.Color = def.paint; d.Material = def.mat; d.Reflectance = def.refl or 0 end
+        return parts
+    end
+    local function sparkle(s, def)
+        local box = Instance.new("Part")
+        box.Name = "MutFx"; box.Anchored = true; box.CanCollide = false; box.CanQuery = false; box.CanTouch = false
+        box.Transparency = 1; box.Size = s.size * 0.8; box.Parent = s.model
+        box.CFrame = s.model:GetPivot() * s.centerToPivot:Inverse()
+        local pe = Instance.new("ParticleEmitter")
+        pe.Texture = def.flame and "rbxasset://textures/particles/fire_main.dds" or "rbxasset://textures/particles/sparkles_main.dds"
+        pe.Color = ColorSequence.new(def.fx); pe.LightEmission = 1
+        pe.Rate = GK.lite and 4 or (def.flame and 18 or 9)
+        pe.Lifetime = NumberRange.new(0.8, 1.4); pe.Speed = NumberRange.new(0.5, 2)
+        pe.Size = NumberSequence.new({NumberSequenceKeypoint.new(0, math.clamp(s.size.Y * 0.08, 0.3, 2)), NumberSequenceKeypoint.new(1, 0)})
+        pe.Transparency = NumberSequence.new(0.2, 1)
+        if def.flame then pe.Acceleration = Vector3.new(0, 6, 0) end
+        pe.Parent = box
+        if def.light then
+            local l = Instance.new("PointLight"); l.Color = def.light; l.Brightness = 2.5
+            l.Range = math.clamp(s.size.Y * 1.6, 8, 40); l.Parent = box
+        end
+        return box
+    end
+    -- aplica (ou reaplica, se o modelo foi trocado) a mutacao no pet
+    function GK.applyMut(s, force)
+        if s.isEgg or not s.model or not s.model.Parent then return end
+        if not s.mut then
+            local m = force or pick()
+            if not m then return end
+            s.mut, s.mutX = m, GK.MUTS[m].x
+        end
+        local def = GK.MUTS[s.mut]
+        s.mutParts = def.paint and paint(s, def) or nil
+        if def.fx then pcall(sparkle, s, def) end
+        s.mutModel = s.model
+        if s.tagLabel and s.tagIsData then
+            local dn = s.tagLabel.Parent and s.tagLabel.Parent:FindFirstChild("DisplayName")
+            if dn then dn.Text = s.mut .. " " .. (s.petName or "") end
+        end
+    end
+    -- arco-iris mudando de cor + reaplica se o pet trocou de modelo (quando o script aprende o visual real)
+    task.spawn(function()
+        local h = 0
+        while task.wait(0.12) do
+            if not alive() then break end
+            h = (h + 0.025) % 1
+            for _, sp in ipairs(spawned) do
+                if sp.mut and sp.model.Parent then
+                    if sp.mutModel ~= sp.model then pcall(GK.applyMut, sp) end
+                    if sp.mut == "Rainbow" and sp.mutParts then
+                        local c = Color3.fromHSV(h, 0.75, 1)
+                        for i, d in ipairs(sp.mutParts) do
+                            if i > 60 then break end
+                            d.Color = c
+                        end
+                    end
+                end
+            end
+        end
+    end)
+end
+
 -- ===== 💰 RENDA ESCOLHIDA tambem na placa dos SEUS pets de verdade (so na sua tela) =====
 task.spawn(function()
     while task.wait(1) do
@@ -3142,6 +3238,8 @@ do
         local r = ride
         ride = nil
         pcall(function() r.conn:Disconnect() end)
+        pcall(function() r.keyConn:Disconnect() end)
+        pcall(function() r.gui:Destroy() end)
         setRealHidden(false)
         local ch = LP.Character
         local rh = ch and ch:FindFirstChild("HumanoidRootPart")
@@ -3223,6 +3321,26 @@ do
         end)
         -- altura do quadril sentado acima da sela
         local seat = (hum.RigType == Enum.HumanoidRigType.R15) and (hrp.Size.Y * 0.5 + 0.6) or 1.7
+        -- como no jogo: [F] Desmontar (e botao na tela pro celular)
+        pcall(function()
+            local sg = Instance.new("ScreenGui")
+            sg.Name = "NS22Mount"; sg.ResetOnSpawn = false; sg.DisplayOrder = 50
+            local okp = pcall(function() sg.Parent = (gethui and gethui()) or game:GetService("CoreGui") end)
+            if not okp or not sg.Parent then sg.Parent = LP:WaitForChild("PlayerGui") end
+            local b = Instance.new("TextButton")
+            b.AnchorPoint = Vector2.new(0.5, 1); b.Position = UDim2.new(0.5, 0, 1, -110); b.Size = UDim2.fromOffset(190, 44)
+            b.BackgroundColor3 = Color3.fromRGB(30, 30, 38); b.BackgroundTransparency = 0.15; b.AutoButtonColor = true
+            b.Font = Enum.Font.GothamBlack; b.TextSize = 18; b.TextColor3 = Color3.new(1, 1, 1); b.Text = "[F]  Desmontar"
+            Instance.new("UICorner", b).CornerRadius = UDim.new(0, 12)
+            local st = Instance.new("UIStroke", b); st.Color = Color3.fromRGB(120, 220, 120); st.Thickness = 2
+            b.Parent = sg
+            b.MouseButton1Click:Connect(function() GK.dismount() end)
+            r.gui = sg
+            r.keyConn = game:GetService("UserInputService").InputBegan:Connect(function(io, gp)
+                if not gp and io.KeyCode == Enum.KeyCode.F then GK.dismount() end
+            end)
+        end)
+        local hopY, hopV = 0, 0
         local moving, bobT = false, 0
         r.conn = RunService.Heartbeat:Connect(function(dt)
             if ride ~= r then return end
@@ -3251,7 +3369,13 @@ do
             -- pulinho de galope se o pet nao tiver animacao
             bobT = bobT + dt
             local bob = (not animated and mv) and math.abs(math.sin(bobT * 10)) * 0.8 or 0
-            local center = Vector3.new(pos.X, floor + ms.size.Y / 2 + bob, pos.Z)
+            -- pulo montado (espaco / botao de pular)
+            if rhum.Jump and hopY <= 0 then hopV = 28; rhum.Jump = false end
+            if hopY > 0 or hopV > 0 then
+                hopY = hopY + hopV * dt; hopV = hopV - 90 * dt
+                if hopY <= 0 then hopY, hopV = 0, 0 end
+            end
+            local center = Vector3.new(pos.X, floor + ms.size.Y / 2 + bob + hopY, pos.Z)
             local rot = CFrame.lookAt(Vector3.zero, look)
             pet:PivotTo(CFrame.new(center) * rot * ms.centerToPivot)
             hrp.CFrame = CFrame.new(center + Vector3.new(0, backY + seat + GK.mountUp, 0) - look * (backZ + GK.mountBack)) * rot
@@ -3788,7 +3912,7 @@ end
 local function buildHub()
 local TS  = game:GetService("TweenService")
 local UIS = game:GetService("UserInputService")
-local VERSION = "v49"
+local VERSION = "v50"
 local pickResp
 
 if getgenv then
@@ -4378,29 +4502,49 @@ searchBox:GetPropertyChangedSignal("Text"):Connect(function()
     task.delay(0.35, function() if my == searchToken then rebuild(searchBox.Text) end end)
 end)
 rebuild("")
--- pets novos guardados fora da pasta de sempre: procura aos poucos (sem travar) e poe na grade
+-- pets que nao ficam na pasta de sempre (ex.: World Burner, o demonio puro): procura aos poucos (sem travar)
 task.spawn(function()
     task.wait(3)
     GK.extraPets = GK.extraPets or {}
-    local have, added = {}, 0
+    local have = {}
     for _, n in ipairs(names) do have[n] = true end
+    local want = {}     -- pets da lista do jogo que ainda faltam na grade (por nome normalizado)
+    for n in pairs(GK.info) do if not have[n] then want[norm(n)] = n end end
     local am = RS:FindFirstChild("AssetModels")
+    local eggs; pcall(function() eggs = RS.Assets.Models.Eggs end)
+    local function addName(n, model)
+        if have[n] then return false end
+        have[n] = true
+        if model then GK.extraPets[n] = model end
+        table.insert(names, n)
+        return true
+    end
+    local function refresh() table.sort(names); pcall(rebuild, searchBox.Text) end
+    local added = 0
     local ok, all = pcall(function() return RS:GetDescendants() end)
-    if not ok then return end
-    for i, d in ipairs(all) do
-        if not alive() then return end
-        if i % 400 == 0 then task.wait() end
-        if added < 60 and d:IsA("Model") and not have[d.Name] and not (am and d:IsDescendantOf(am))
-            and (d:GetAttribute("ReviewCategory") or d:GetAttribute("PreparedSourceName")) and d:FindFirstChild("Model") then
-            have[d.Name] = true; added = added + 1
-            GK.extraPets[d.Name] = d
-            table.insert(names, d.Name)
+    if ok then
+        for i, d in ipairs(all) do
+            if not alive() then return end
+            if i % 400 == 0 then task.wait() end
+            if d:IsA("Model") and not have[d.Name] and not (am and d:IsDescendantOf(am)) and not (eggs and d:IsDescendantOf(eggs))
+                and not (d.Parent and d.Parent.Name:lower():find("egg")) then
+                local wn = want[norm(d.Name)]
+                if wn and d:FindFirstChildWhichIsA("BasePart", true) then
+                    if addName(wn, d) then added = added + 1 end
+                elseif added < 80 and (d:GetAttribute("ReviewCategory") or d:GetAttribute("PreparedSourceName")) and d:FindFirstChild("Model") then
+                    if addName(d.Name, d) then added = added + 1 end
+                end
+            end
         end
     end
     all = nil
-    if added > 0 and alive() then
-        table.sort(names)
-        pcall(rebuild, searchBox.Text)
+    if added > 0 and alive() then refresh() end
+    -- pets que aparecem nas bases do servidor (ex.: World Burner de outro jogador) entram na grade sozinhos
+    while task.wait(8) do
+        if not alive() then break end
+        local n2 = 0
+        for n in pairs(GK.renderCache) do if addName(n) then n2 = n2 + 1 end end
+        if n2 > 0 then refresh() end
     end
 end)
 
@@ -4478,6 +4622,19 @@ end, function()
     for k, v in ipairs(opts) do if v == (GK.incomeOverride or false) then i = k end end
     GK.incomeOverride = opts[i % #opts + 1] or nil
     for _, sp in ipairs(spawned) do if not sp.isEgg then sp.income = nil end end
+end)
+cycle(pPets, "🧬 Mutação dos pets novos", function() return GK.mutMode end, function()
+    local i = table.find(GK.MUT_ORDER, GK.mutMode) or 1
+    GK.mutMode = GK.MUT_ORDER[i % #GK.MUT_ORDER + 1]
+end)
+button(pPets, "🧬 Pôr essa mutação nos pets da base", "card", function()
+    local m = GK.mutMode
+    if not GK.MUTS[m] then setStatus("Escolha uma mutação (Silver, Golden, Rainbow...) primeiro") return end
+    local n = 0
+    for _, sp in ipairs(spawned) do
+        if not sp.isEgg and not sp.mut then pcall(GK.applyMut, sp, m); n = n + 1 end
+    end
+    setStatus("🧬 " .. m .. " em " .. n .. " pets")
 end)
 toggle(pPets, "🚶 Pets passeiam pelo cercado", function() return wander end, function(v) wander = v end)
 row(pPets, {
