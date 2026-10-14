@@ -377,6 +377,7 @@ end
 local animDebug = {}
 
 local function playAnim(m, name, s)
+    if GK and GK.hauntBase and GK.hauntBase[name] then name = GK.hauntBase[name] end
     local ac = m:FindFirstChildWhichIsA("AnimationController", true) or m:FindFirstChildWhichIsA("Humanoid", true)
     local dbg = {pet = name, controller = ac and ac.ClassName or "NENHUM", config = 0, index = 0}
     animDebug[#animDebug + 1] = dbg
@@ -1070,6 +1071,7 @@ GK = {notify = false, incomeOverride = nil, lite = game:GetService("UserInputSer
     info = {}, grad = {}, file = "modvip_pet_learn.json", hatchMode = "Rápido", gameFx = true, speedMode = "Rápido", treadBonus = 300000, flashChar = true, runSpeed = 300, renderCache = {}, renderPure = {}}
 -- "assinatura" do esqueleto: se o modelo nao tem os mesmos ossos/juntas, a animacao do jogo fica toda errada nele
 function GK.petSource(name)
+    if GK.H and GK.H.byName and GK.H.byName[name] then return GK.H.source(name) end
     if GK.renderCache[name] then return GK.renderCache[name] end
     local am = RS:FindFirstChild("AssetModels")
     if not am then return end
@@ -3342,6 +3344,11 @@ do
         end
         local def = GK.MUTS[s.mut]
         s.mutParts = def.paint and paint(s, def) or nil
+        if def.ghost then
+            for _, d in ipairs(s.model:GetDescendants()) do
+                if d:IsA("BasePart") and d.Transparency < 0.95 and d.Name ~= "MutFx" then d.Material = Enum.Material.ForceField; d.Color = def.ghost end
+            end
+        end
         if def.fx then pcall(sparkle, s, def) end
         s.mutModel = s.model
         if s.tagLabel and s.tagIsData then
@@ -3646,6 +3653,1101 @@ do
         end)
         return true
     end
+end
+
+-- =====================================================================
+-- 🎃 DIMENSAO ASSOMBRADA (area nova depois da ultima - so na sua tela)
+-- Portal no fim do mapa (depois da Enchanted Forest) ou botao na aba 🎃 do menu.
+-- La dentro voce controla uma COPIA sua: o personagem de verdade fica parado e escondido
+-- (pro jogo voce nao saiu do lugar, entao nao parece que voce esta voando no vazio).
+-- Ninhos com ovos-abobora, guardiao Ceifador, chefe Cavaleiro Sem Cabeca, mutacao Spectral.
+-- =====================================================================
+GK.H = {req = 250e9, file = "99ns22_assombrada.json", data = {disc = {}, bosses = 0, stolen = 0},
+    C = Vector3.new(6000, 900, 6000), R = 222, tpl = {}, byName = {}, nests = {}, wisps = {}, bats = {}}
+GK.hauntBase = GK.hauntBase or {}
+do
+    local H = GK.H
+    pcall(function()
+        if isfile and isfile(H.file) then
+            local d = HttpService:JSONDecode(readfile(H.file))
+            if type(d) == "table" then
+                H.data.disc = type(d.disc) == "table" and d.disc or {}
+                H.data.bosses = tonumber(d.bosses) or 0
+                H.data.stolen = tonumber(d.stolen) or 0
+            end
+        end
+    end)
+    function H.save() pcall(function() if writefile then writefile(H.file, HttpService:JSONEncode(H.data)) end end) end
+
+    -- ---------- pets novos (feitos a partir dos modelos do jogo, transformados) ----------
+    H.PETS = {
+        {n = "Abóbora Saltitante", r = "Common", i = 80e6, w = 30, base = {"Frog", "Lava Frog", "Duckling", "Turtle", "Chicken"},
+            c1 = Color3.fromRGB(255, 130, 20), c2 = Color3.fromRGB(50, 100, 30), eye = Color3.fromRGB(255, 220, 70), fx = {"brasas"}},
+        {n = "Morcego Sombrio", r = "Uncommon", i = 250e6, w = 22, base = {"Bird", "Toucan", "Burrowing Owl", "Parrotfish"},
+            c1 = Color3.fromRGB(28, 24, 34), c2 = Color3.fromRGB(110, 40, 150), eye = Color3.fromRGB(255, 40, 40), fx = {"roxo"}},
+        {n = "Gato Bruxo", r = "Rare", i = 900e6, w = 16, base = {"Fox", "Fennec", "Red Panda", "Raccoon"},
+            c1 = Color3.fromRGB(22, 20, 28), c2 = Color3.fromRGB(140, 60, 210), eye = Color3.fromRGB(120, 255, 90), fx = {"roxo", "luz"}},
+        {n = "Lobo Fantasma", r = "Epic", i = 3e9, w = 12, base = {"Demon Hound", "Dog", "Fox", "Sabertooth Tiger"}, ghost = true,
+            c1 = Color3.fromRGB(160, 255, 235), c2 = Color3.fromRGB(90, 200, 255), eye = Color3.fromRGB(255, 255, 255), fx = {"nevoa", "luz"}},
+        {n = "Corvo da Meia-Noite", r = "Legendary", i = 8e9, w = 8, base = {"Snowy Owl", "Crane", "Holy Peacock", "Light Dove", "Swan"},
+            c1 = Color3.fromRGB(18, 16, 22), c2 = Color3.fromRGB(170, 20, 40), eye = Color3.fromRGB(255, 50, 50), fx = {"fumaca"}},
+        {n = "Esqueleto Errante", r = "Mythic", i = 20e9, w = 5, base = {"Skeletal Sabertooth", "Skeletal Terrorbird", "Skeleton Horse", "Cosmic Skeleton Boss", "Skeletal Glyptodon"},
+            c1 = Color3.fromRGB(235, 230, 212), c2 = Color3.fromRGB(70, 70, 75), eye = Color3.fromRGB(90, 255, 90), fx = {"fogo", "luz"}},
+        {n = "Aranha Tecelã", r = "Cosmic", i = 45e9, w = 3.5, base = {"Spider", "Sand Spider", "Spideron", "Scorpion"},
+            c1 = Color3.fromRGB(40, 20, 55), c2 = Color3.fromRGB(255, 120, 20), eye = Color3.fromRGB(255, 40, 40), fx = {"roxo"}},
+        {n = "Dragão Morcego", r = "Secret", i = 90e9, w = 2, base = {"Shadow Dragon", "Lava Dragon", "Ice Dragon", "Cosmic Dragon", "Void Dragon"},
+            c1 = Color3.fromRGB(45, 22, 60), c2 = Color3.fromRGB(255, 110, 20), eye = Color3.fromRGB(255, 150, 30), fx = {"brasas", "luz"}},
+        {n = "Ceifador", r = "Eternal", i = 180e9, w = 1, base = {"Wendigo", "Cerberus", "Gargoyle", "Imp", "Abyss Overlord"},
+            c1 = Color3.fromRGB(15, 15, 18), c2 = Color3.fromRGB(60, 255, 120), eye = Color3.fromRGB(60, 255, 120), fx = {"fogo", "nevoa", "luz"}},
+        {n = "Rei Abóbora", r = "Divine", i = 400e9, w = 0.5, base = {"Gorilla King", "Yeti", "Gorilla", "King Mammoth", "Polar Bear"},
+            c1 = Color3.fromRGB(255, 125, 15), c2 = Color3.fromRGB(20, 18, 22), eye = Color3.fromRGB(255, 230, 80), fx = {"fogo", "brasas", "luz"}},
+        {n = "Cavaleiro Sem Cabeça", r = "Divine", i = 1e12, w = 0, boss = true, base = {"Skeleton Horse", "Pegasus", "Centaur", "Stag", "Unicorn"},
+            c1 = Color3.fromRGB(20, 20, 26), c2 = Color3.fromRGB(60, 220, 255), eye = Color3.fromRGB(60, 255, 200), fx = {"fogo", "nevoa", "luz"}},
+    }
+    H.RANK = {Common = 1, Uncommon = 2, Rare = 3, Epic = 4, Legendary = 5, Mythic = 6, Cosmic = 7, Secret = 8, Eternal = 9, Divine = 10}
+    for _, p in ipairs(H.PETS) do
+        H.byName[p.n] = p
+        local e = GK.info[p.n] or {}
+        e.rarity, e.income, e.pure = p.r, p.i, true
+        GK.info[p.n] = e
+    end
+    -- mutacao exclusiva da area: Spectral (fantasma brilhando, x4)
+    if GK.MUTS then
+        GK.MUTS.Spectral = {x = 4, ghost = Color3.fromRGB(170, 255, 230), light = Color3.fromRGB(150, 255, 220), fx = Color3.fromRGB(200, 255, 240)}
+    end
+
+    function H.baseOf(p)
+        if p.baseName and GK.petSource(p.baseName) then return p.baseName end
+        for _, b in ipairs(p.base) do
+            if GK.petSource(b) then p.baseName = b return b end
+        end
+        local am = RS:FindFirstChild("AssetModels")
+        local any = am and am:FindFirstChildWhichIsA("Model")
+        p.baseName = any and any.Name
+        return p.baseName
+    end
+    function H.addFx(m, p)
+        local host, bv
+        for _, d in ipairs(m:GetDescendants()) do
+            if d:IsA("BasePart") and d.Transparency < 0.95 then
+                local v = d.Size.X * d.Size.Y * d.Size.Z
+                if not bv or v > bv then host, bv = d, v end
+            end
+        end
+        if not host then return end
+        local sz = math.clamp(host.Size.Magnitude * 0.12, 0.4, 4)
+        local function pe(tex, c, rate, life, speed, size, tr, accel, light)
+            local e = Instance.new("ParticleEmitter")
+            e.Texture = tex; e.Color = ColorSequence.new(c); e.Rate = GK.lite and math.max(1, rate * 0.4) or rate
+            e.Lifetime = NumberRange.new(life * 0.7, life); e.Speed = NumberRange.new(speed * 0.5, speed)
+            e.SpreadAngle = Vector2.new(180, 180); e.LightEmission = light or 1
+            e.Size = NumberSequence.new({NumberSequenceKeypoint.new(0, size), NumberSequenceKeypoint.new(1, 0)})
+            e.Transparency = NumberSequence.new(tr or 0.3, 1)
+            if accel then e.Acceleration = accel end
+            e.Parent = host
+        end
+        for _, k in ipairs(p.fx or {}) do
+            if k == "brasas" then pe("rbxasset://textures/particles/sparkles_main.dds", Color3.fromRGB(255, 140, 30), 10, 1.4, 1.5, sz * 0.5, 0.1, Vector3.new(0, 3, 0))
+            elseif k == "roxo" then pe("rbxasset://textures/particles/sparkles_main.dds", Color3.fromRGB(170, 80, 255), 8, 1.2, 1, sz * 0.5)
+            elseif k == "fogo" then pe("rbxasset://textures/particles/fire_main.dds", Color3.fromRGB(80, 255, 110), 14, 0.8, 2, sz, 0.2, Vector3.new(0, 5, 0))
+            elseif k == "nevoa" then pe("rbxasset://textures/particles/smoke_main.dds", Color3.fromRGB(190, 255, 240), 4, 2.5, 0.6, sz * 2, 0.75, nil, 0.3)
+            elseif k == "fumaca" then pe("rbxasset://textures/particles/smoke_main.dds", Color3.fromRGB(30, 20, 35), 6, 2, 0.8, sz * 1.6, 0.5, Vector3.new(0, 1, 0), 0)
+            elseif k == "luz" then
+                local l = Instance.new("PointLight"); l.Color = p.eye; l.Brightness = 2
+                l.Range = math.clamp(host.Size.Magnitude * 1.5, 8, 30); l.Parent = host
+            end
+        end
+    end
+    -- pinta o pet: corpo na cor principal, pecas pequenas na cor de detalhe, olhos brilhando
+    function H.style(m, p)
+        local parts, big = {}, 0
+        for _, d in ipairs(m:GetDescendants()) do
+            if d:IsA("SurfaceAppearance") or d:IsA("Decal") or d:IsA("Texture") then d:Destroy()
+            elseif d:IsA("SpecialMesh") then d.TextureId = ""
+            elseif d:IsA("BasePart") and d.Transparency < 0.95 then
+                if d:IsA("MeshPart") then d.TextureID = "" end
+                local v = d.Size.X * d.Size.Y * d.Size.Z
+                big = math.max(big, v)
+                table.insert(parts, {d, v})
+            end
+        end
+        for _, e in ipairs(parts) do
+            local d, v = e[1], e[2]
+            local n = d.Name:lower()
+            if d:GetAttribute("IsEye") or n:find("eye") or n:find("pupil") then
+                d.Color = p.eye; d.Material = Enum.Material.Neon
+            else
+                d.Color = (v < big * 0.08) and p.c2 or p.c1
+                d.Material = p.ghost and Enum.Material.ForceField or Enum.Material.SmoothPlastic
+                d.Reflectance = 0
+            end
+        end
+        H.addFx(m, p)
+    end
+    -- modelo pronto do pet novo (guardado; o jogo do hub copia dele)
+    function H.source(name)
+        local p = H.byName[name]; if not p then return end
+        if H.tpl[name] then return H.tpl[name] end
+        local bn = H.baseOf(p); if not bn then return end
+        local src = GK.petSource(bn); if not src then return end
+        local ok, c = pcall(function() return src:Clone() end)
+        if not ok or not c then return end
+        if not c:IsA("Model") then local w = Instance.new("Model"); c.Parent = w; c = w end
+        pcall(H.style, c, p)
+        c.Name = p.n
+        H.tpl[name] = c
+        GK.hauntBase[p.n] = bn
+        return c
+    end
+
+    -- ---------- pecas do cenario ----------
+    function H.p(size, cf, color, mat, parent, shape, mesh)
+        local x = Instance.new("Part")
+        x.Anchored = true; x.CanCollide = false; x.CanTouch = false; x.CanQuery = false; x.CastShadow = false
+        x.TopSurface = Enum.SurfaceType.Smooth; x.BottomSurface = Enum.SurfaceType.Smooth
+        if shape then x.Shape = shape end
+        x.Size = size; x.CFrame = cf; x.Color = color; x.Material = mat or Enum.Material.SmoothPlastic
+        if mesh then local sm = Instance.new("SpecialMesh"); sm.MeshType = mesh; sm.Parent = x end
+        x.Parent = parent or H.world
+        if H.building then
+            H.nParts = (H.nParts or 0) + 1
+            if H.nParts % 150 == 0 then task.wait() end
+        end
+        return x
+    end
+    -- abobora (ovo e enfeite): gomos, cabinho, rosto aceso
+    function H.pumpkin(cf, s, col, face, glow)
+        local m = Instance.new("Model"); m.Name = "Pumpkin"
+        local core = H.p(Vector3.new(2.4, 2.1, 2.4) * s, cf, col, nil, m, nil, Enum.MeshType.Sphere)
+        core.Name = "Core"
+        local dark = col:Lerp(Color3.new(0, 0, 0), 0.18)
+        for k = 0, 3 do
+            H.p(Vector3.new(1.25, 2.15, 2.55) * s, cf * CFrame.Angles(0, math.rad(k * 45), 0), dark, nil, m, nil, Enum.MeshType.Sphere)
+        end
+        H.p(Vector3.new(0.3, 0.7, 0.3) * s, cf * CFrame.new(0, 1.2 * s, 0) * CFrame.Angles(0, 0, math.rad(14)), Color3.fromRGB(70, 95, 35), Enum.Material.Wood, m)
+        for _, ex in ipairs({-0.45, 0.45}) do
+            H.p(Vector3.new(0.42, 0.42, 0.14) * s, cf * CFrame.new(ex * s, 0.28 * s, -1.13 * s) * CFrame.Angles(0, 0, math.rad(45)), face, Enum.Material.Neon, m)
+        end
+        H.p(Vector3.new(1.15, 0.24, 0.14) * s, cf * CFrame.new(0, -0.36 * s, -1.13 * s), face, Enum.Material.Neon, m)
+        if glow ~= false then
+            local l = Instance.new("PointLight"); l.Color = face; l.Brightness = 1.6; l.Range = 9 * s; l.Parent = core
+        end
+        m.PrimaryPart = core
+        return m, core
+    end
+    H.EGGC = {Common = {255, 130, 20}, Uncommon = {255, 175, 45}, Rare = {210, 90, 35}, Epic = {140, 60, 200}, Legendary = {255, 205, 50},
+        Mythic = {190, 30, 50}, Cosmic = {80, 60, 220}, Secret = {28, 24, 32}, Eternal = {235, 232, 222}, Divine = {18, 18, 20}}
+    -- ovo-abobora do pet (cor pela raridade; os raros tem fogo verde; Spectral = fantasma)
+    function H.makeEgg(name, mut)
+        local p = H.byName[name] or H.PETS[1]
+        local c = H.EGGC[p.r] or H.EGGC.Common
+        local col = p.boss and Color3.fromRGB(25, 30, 40) or Color3.fromRGB(c[1], c[2], c[3])
+        local rk = H.RANK[p.r] or 1
+        local face = (rk >= 8 or p.boss) and Color3.fromRGB(90, 255, 110) or Color3.fromRGB(255, 200, 60)
+        local m, core = H.pumpkin(CFrame.new(), 1, col, face, true)
+        m.Name = "PumpkinEgg"
+        if rk >= 4 then
+            local e = Instance.new("ParticleEmitter")
+            e.Texture = "rbxasset://textures/particles/sparkles_main.dds"; e.Color = ColorSequence.new(GK.COLORS[p.r] or Color3.new(1, 1, 1))
+            e.LightEmission = 1; e.Rate = 6; e.Lifetime = NumberRange.new(0.8, 1.3); e.Speed = NumberRange.new(0.5, 1.5)
+            e.SpreadAngle = Vector2.new(180, 180); e.Size = NumberSequence.new({NumberSequenceKeypoint.new(0, 0.35), NumberSequenceKeypoint.new(1, 0)})
+            e.Parent = core
+        end
+        if rk >= 6 or p.boss then
+            local a = Instance.new("Attachment"); a.Position = Vector3.new(0, 1.3, 0); a.Parent = core
+            local f = Instance.new("ParticleEmitter")
+            f.Texture = "rbxasset://textures/particles/fire_main.dds"; f.Color = ColorSequence.new(Color3.fromRGB(80, 255, 110))
+            f.LightEmission = 1; f.Rate = 18; f.Lifetime = NumberRange.new(0.4, 0.7); f.Speed = NumberRange.new(1, 2.5)
+            f.SpreadAngle = Vector2.new(15, 15); f.Size = NumberSequence.new({NumberSequenceKeypoint.new(0, 0.7), NumberSequenceKeypoint.new(1, 0)})
+            f.Acceleration = Vector3.new(0, 4, 0); f.Parent = a
+        end
+        if mut == "Spectral" then
+            for _, d in ipairs(m:GetDescendants()) do
+                if d:IsA("BasePart") and d.Material ~= Enum.Material.Neon then d.Material = Enum.Material.ForceField; d.Color = Color3.fromRGB(170, 255, 230) end
+            end
+            local e = Instance.new("ParticleEmitter")
+            e.Texture = "rbxasset://textures/particles/smoke_main.dds"; e.Color = ColorSequence.new(Color3.fromRGB(200, 255, 240))
+            e.LightEmission = 0.4; e.Rate = 4; e.Lifetime = NumberRange.new(1.5, 2.2); e.Speed = NumberRange.new(0.3, 0.8)
+            e.SpreadAngle = Vector2.new(180, 180); e.Size = NumberSequence.new({NumberSequenceKeypoint.new(0, 1.2), NumberSequenceKeypoint.new(1, 0)})
+            e.Transparency = NumberSequence.new(0.6, 1); e.Parent = core
+        end
+        if mut then m:SetAttribute("NS22Mut", mut) end
+        return m
+    end
+    function H.tree(pos, h, r)
+        local bark = Color3.fromRGB(38, 30, 28)
+        H.p(Vector3.new(1.8, h, 1.8), CFrame.new(pos + Vector3.new(0, h / 2, 0)) * CFrame.Angles(math.rad(r:NextNumber(-5, 5)), r:NextNumber() * 6.28, math.rad(r:NextNumber(-5, 5))), bark, Enum.Material.Wood)
+        for _ = 1, 4 do
+            local y = h * r:NextNumber(0.45, 0.9)
+            local yaw = r:NextNumber() * 6.28
+            local len = h * r:NextNumber(0.25, 0.45)
+            local tilt = math.rad(r:NextNumber(35, 65))
+            local cf = CFrame.new(pos + Vector3.new(0, y, 0)) * CFrame.Angles(0, yaw, 0) * CFrame.Angles(0, 0, -tilt) * CFrame.new(0, len / 2, 0)
+            H.p(Vector3.new(0.7, len, 0.7), cf, bark, Enum.Material.Wood)
+            local tip = (cf * CFrame.new(0, len / 2, 0)).Position
+            local cf2 = CFrame.new(tip) * CFrame.Angles(0, yaw + r:NextNumber(-1, 1), 0) * CFrame.Angles(0, 0, -tilt * 0.4) * CFrame.new(0, len * 0.25, 0)
+            H.p(Vector3.new(0.35, len * 0.5, 0.35), cf2, bark, Enum.Material.Wood)
+        end
+    end
+    function H.grave(pos, r)
+        local g = Color3.fromRGB(105, 105, 112)
+        local cf = CFrame.new(pos) * CFrame.Angles(0, r:NextNumber() * 6.28, 0) * CFrame.Angles(math.rad(r:NextNumber(-8, 8)), 0, math.rad(r:NextNumber(-6, 6)))
+        if r:NextNumber() < 0.3 then
+            H.p(Vector3.new(0.6, 4, 0.6), cf * CFrame.new(0, 2, 0), g, Enum.Material.Slate)
+            H.p(Vector3.new(2.4, 0.6, 0.6), cf * CFrame.new(0, 2.8, 0), g, Enum.Material.Slate)
+        else
+            H.p(Vector3.new(2.4, 2.6, 0.6), cf * CFrame.new(0, 1.3, 0), g, Enum.Material.Slate)
+            H.p(Vector3.new(0.6, 2.4, 2.4), cf * CFrame.new(0, 2.6, 0) * CFrame.Angles(0, math.rad(90), 0), g, Enum.Material.Slate, nil, Enum.PartType.Cylinder)
+        end
+        H.p(Vector3.new(2.8, 0.3, 3.4), cf * CFrame.new(0, 0.1, 1.6), Color3.fromRGB(60, 48, 36), Enum.Material.Ground)
+    end
+    function H.nest(pos)
+        local wood = Color3.fromRGB(78, 58, 38)
+        H.p(Vector3.new(0.8, 7, 7), CFrame.new(pos + Vector3.new(0, 0.4, 0)) * CFrame.Angles(0, 0, math.rad(90)), Color3.fromRGB(60, 45, 30), Enum.Material.Wood, nil, Enum.PartType.Cylinder)
+        for k = 1, 10 do
+            local a = k / 10 * math.pi * 2
+            H.p(Vector3.new(0.4, 0.4, 3.2), CFrame.new(pos + Vector3.new(math.cos(a) * 3.1, 0.9, math.sin(a) * 3.1)) * CFrame.Angles(0, -a, math.rad(20)), wood, Enum.Material.Wood)
+        end
+        return H.p(Vector3.new(0.15, 8.4, 8.4), CFrame.new(pos + Vector3.new(0, 0.05, 0)) * CFrame.Angles(0, 0, math.rad(90)), Color3.fromRGB(150, 80, 255), Enum.Material.Neon, nil, Enum.PartType.Cylinder)
+    end
+    -- portal: anel neon roxo/verde + disco brilhando + placa
+    function H.makePortal(cf, parent, text)
+        local f = Instance.new("Model"); f.Name = "NS22Portal"
+        local n = 26
+        for i = 1, n do
+            local a = i / n * math.pi * 2
+            H.p(Vector3.new(0.7, 1.9, 0.7), cf * CFrame.new(math.cos(a) * 7, math.sin(a) * 7, 0) * CFrame.Angles(0, 0, a),
+                (i % 2 == 0) and Color3.fromRGB(140, 60, 255) or Color3.fromRGB(80, 255, 130), Enum.Material.Neon, f)
+        end
+        local disc = H.p(Vector3.new(0.25, 13.5, 13.5), cf * CFrame.Angles(0, math.rad(90), 0), Color3.fromRGB(110, 255, 160), Enum.Material.ForceField, f, Enum.PartType.Cylinder)
+        local pe = Instance.new("ParticleEmitter")
+        pe.Texture = "rbxasset://textures/particles/sparkles_main.dds"
+        pe.Color = ColorSequence.new(Color3.fromRGB(170, 90, 255), Color3.fromRGB(90, 255, 150))
+        pe.LightEmission = 1; pe.Rate = 30; pe.Lifetime = NumberRange.new(1, 1.6); pe.Speed = NumberRange.new(1, 3)
+        pe.SpreadAngle = Vector2.new(180, 180); pe.Size = NumberSequence.new({NumberSequenceKeypoint.new(0, 0.6), NumberSequenceKeypoint.new(1, 0)})
+        pe.Parent = disc
+        local l = Instance.new("PointLight"); l.Color = Color3.fromRGB(120, 255, 170); l.Brightness = 3; l.Range = 24; l.Parent = disc
+        local bb = Instance.new("BillboardGui")
+        bb.Size = UDim2.fromOffset(260, 64); bb.StudsOffset = Vector3.new(0, 10, 0); bb.AlwaysOnTop = true; bb.MaxDistance = 260
+        bb.Adornee = disc; bb.Parent = f
+        local t = Instance.new("TextLabel", bb)
+        t.Size = UDim2.fromScale(1, 1); t.BackgroundTransparency = 1; t.Font = Enum.Font.GothamBlack; t.TextScaled = true
+        t.TextColor3 = Color3.fromRGB(255, 160, 50); t.TextStrokeTransparency = 0.2; t.Text = text or ""
+        f.PrimaryPart = disc
+        f.Parent = parent
+        return f, t
+    end
+
+    -- ---------- monta a dimensao (uma vez) ----------
+    function H.build()
+        if H.world then return end
+        H.building = true
+        local C = H.C
+        local R = Random.new(1337)
+        H.world = Instance.new("Folder"); H.world.Name = "NS22Assombrada"
+        local lite = GK.lite
+        local dirt = Color3.fromRGB(64, 50, 38)
+        local cyl = Enum.PartType.Cylinder
+        local up = CFrame.Angles(0, 0, math.rad(90))
+        -- chao, clareira e caminho
+        H.p(Vector3.new(4, 520, 520), CFrame.new(C - Vector3.new(0, 2, 0)) * up, Color3.fromRGB(36, 42, 32), Enum.Material.Grass, nil, cyl)
+        H.p(Vector3.new(0.2, 70, 70), CFrame.new(C + Vector3.new(0, 0.05, 0)) * up, dirt, Enum.Material.Ground, nil, cyl)
+        H.p(Vector3.new(14, 0.2, 170), CFrame.new(C + Vector3.new(0, 0.06, 105)), dirt, Enum.Material.Ground)
+        -- cerca de ferro em volta
+        local nPost = lite and 40 or 64
+        local prev
+        for i = 0, nPost do
+            local a = i / nPost * math.pi * 2
+            local pos = C + Vector3.new(math.cos(a) * 232, 0, math.sin(a) * 232)
+            if i < nPost then
+                H.p(Vector3.new(0.5, 7, 0.5), CFrame.new(pos + Vector3.new(0, 3.5, 0)), Color3.fromRGB(20, 20, 24), Enum.Material.Metal)
+                H.p(Vector3.new(0.35, 0.9, 0.35), CFrame.new(pos + Vector3.new(0, 7.3, 0)) * CFrame.Angles(0, 0, math.rad(45)), Color3.fromRGB(20, 20, 24), Enum.Material.Metal)
+            end
+            if prev then
+                for _, hy in ipairs({2, 5.5}) do
+                    local a1, b1 = prev + Vector3.new(0, hy, 0), pos + Vector3.new(0, hy, 0)
+                    H.p(Vector3.new(0.2, 0.2, (b1 - a1).Magnitude), CFrame.lookAt((a1 + b1) / 2, b1), Color3.fromRGB(20, 20, 24), Enum.Material.Metal)
+                end
+            end
+            prev = pos
+        end
+        -- castelo assombrado no fundo
+        local cc = C + Vector3.new(0, 0, -300)
+        local stone, dark = Color3.fromRGB(58, 54, 66), Color3.fromRGB(35, 30, 45)
+        local win = Color3.fromRGB(255, 150, 40)
+        H.p(Vector3.new(80, 40, 40), CFrame.new(cc + Vector3.new(0, 20, 0)), stone, Enum.Material.Slate)
+        for x = -36, 36, 8 do H.p(Vector3.new(4, 4, 4), CFrame.new(cc + Vector3.new(x, 42, 18)), stone, Enum.Material.Slate) end
+        H.p(Vector3.new(26, 34, 22), CFrame.new(cc + Vector3.new(0, 57, -4)), stone, Enum.Material.Slate)
+        for k = 0, 4 do
+            local w = 28 - k * 6
+            H.p(Vector3.new(w, 4, w * 0.8), CFrame.new(cc + Vector3.new(0, 76 + k * 4, -4)), dark, Enum.Material.Slate)
+        end
+        for _, tx in ipairs({-46, 46}) do
+            H.p(Vector3.new(70, 18, 18), CFrame.new(cc + Vector3.new(tx, 35, 0)) * up, stone, Enum.Material.Slate, nil, cyl)
+            for k = 0, 4 do
+                local w = 20 - k * 4
+                H.p(Vector3.new(4, w, w), CFrame.new(cc + Vector3.new(tx, 72 + k * 4, 0)) * up, dark, Enum.Material.Slate, nil, cyl)
+            end
+            H.p(Vector3.new(3, 5, 0.4), CFrame.new(cc + Vector3.new(tx, 52, 9.1)), win, Enum.Material.Neon)
+            H.p(Vector3.new(3, 5, 0.4), CFrame.new(cc + Vector3.new(tx, 36, 9.1)), win, Enum.Material.Neon)
+        end
+        for _, wx in ipairs({-26, -13, 13, 26}) do
+            for _, wy in ipairs({16, 30}) do H.p(Vector3.new(3, 5, 0.4), CFrame.new(cc + Vector3.new(wx, wy, 20.2)), win, Enum.Material.Neon) end
+        end
+        H.p(Vector3.new(4, 6, 0.4), CFrame.new(cc + Vector3.new(0, 58, 7.2)), Color3.fromRGB(90, 255, 120), Enum.Material.Neon)
+        H.p(Vector3.new(14, 18, 1), CFrame.new(cc + Vector3.new(0, 9, 20.3)), Color3.fromRGB(15, 12, 18), Enum.Material.Wood)
+        -- lua vermelha
+        H.p(Vector3.new(90, 90, 90), CFrame.new(C + Vector3.new(-260, 330, -620)), Color3.fromRGB(210, 50, 40), Enum.Material.Neon, nil, Enum.PartType.Ball)
+        -- arvores secas, tumulos e aboboras (longe dos ninhos, do caminho e do portal)
+        local nestPos = {}
+        for i = 1, 8 do
+            local a = math.rad((i - 1) * 45 + 22.5)
+            table.insert(nestPos, C + Vector3.new(math.cos(a) * 125, 0, math.sin(a) * 125))
+        end
+        local function freeSpot(minR, maxR)
+            for _ = 1, 30 do
+                local a, d = R:NextNumber() * math.pi * 2, R:NextNumber(minR, maxR)
+                local p = C + Vector3.new(math.cos(a) * d, 0, math.sin(a) * d)
+                local ok = not (math.abs(p.X - C.X) < 14 and p.Z > C.Z) and (p - (C + Vector3.new(0, 0, 200))).Magnitude > 24
+                for _, np in ipairs(nestPos) do if (np - p).Magnitude < 16 then ok = false break end end
+                if ok then return p end
+            end
+            return C + Vector3.new(0, 0, -200)
+        end
+        for _ = 1, lite and 8 or 16 do H.tree(freeSpot(45, 215), R:NextNumber(14, 24), R) end
+        for _ = 1, lite and 14 or 30 do H.grave(freeSpot(40, 210), R) end
+        for i = 1, lite and 10 or 18 do
+            local p = freeSpot(30, 215)
+            local s = R:NextNumber(1.3, 2.8)
+            local m = H.pumpkin(CFrame.new(p + Vector3.new(0, 1 * s, 0)) * CFrame.Angles(0, R:NextNumber() * 6.28, 0), s,
+                Color3.fromRGB(255, 120, 15), Color3.fromRGB(255, 200, 60), i % 2 == 0)
+            m.Parent = H.world
+        end
+        -- postes com lanterna no caminho
+        for _, x in ipairs({-11, 11}) do
+            for z = 40, 180, 35 do
+                local b = C + Vector3.new(x, 0, z)
+                H.p(Vector3.new(0.5, 9, 0.5), CFrame.new(b + Vector3.new(0, 4.5, 0)), Color3.fromRGB(20, 20, 24), Enum.Material.Metal)
+                local lamp = H.p(Vector3.new(1.4, 1.4, 1.4), CFrame.new(b + Vector3.new(0, 9.4, 0)), Color3.fromRGB(255, 150, 50), Enum.Material.Neon, nil, Enum.PartType.Ball)
+                local l = Instance.new("PointLight"); l.Color = Color3.fromRGB(255, 150, 60); l.Brightness = 2; l.Range = 22; l.Parent = lamp
+            end
+        end
+        -- velas em volta da cama do guardiao (meio)
+        for k = 1, 12 do
+            local a = k / 12 * math.pi * 2
+            local b = C + Vector3.new(math.cos(a) * 18, 0, math.sin(a) * 18)
+            H.p(Vector3.new(0.5, 1.4, 0.5), CFrame.new(b + Vector3.new(0, 0.7, 0)), Color3.fromRGB(235, 230, 215), Enum.Material.SmoothPlastic)
+            local fl = H.p(Vector3.new(0.3, 0.5, 0.3), CFrame.new(b + Vector3.new(0, 1.65, 0)), Color3.fromRGB(120, 255, 140), Enum.Material.Neon)
+            if k % 3 == 0 then local l = Instance.new("PointLight"); l.Color = Color3.fromRGB(120, 255, 140); l.Range = 12; l.Brightness = 1.5; l.Parent = fl end
+        end
+        -- neblina rasteira
+        for _ = 1, lite and 3 or 7 do
+            local p = freeSpot(0, 190)
+            local fp = H.p(Vector3.new(60, 1, 60), CFrame.new(p + Vector3.new(0, 1.5, 0)), Color3.new(1, 1, 1))
+            fp.Transparency = 1
+            local e = Instance.new("ParticleEmitter")
+            e.Texture = "rbxasset://textures/particles/smoke_main.dds"; e.Color = ColorSequence.new(Color3.fromRGB(150, 140, 170))
+            e.LightEmission = 0; e.Rate = lite and 1 or 2; e.Lifetime = NumberRange.new(10, 14); e.Speed = NumberRange.new(0.5, 1.5)
+            e.SpreadAngle = Vector2.new(180, 0)
+            e.Size = NumberSequence.new({NumberSequenceKeypoint.new(0, 18), NumberSequenceKeypoint.new(1, 30)})
+            e.Transparency = NumberSequence.new({NumberSequenceKeypoint.new(0, 1), NumberSequenceKeypoint.new(0.3, 0.82), NumberSequenceKeypoint.new(1, 1)})
+            e.Parent = fp
+        end
+        -- almas flutuando
+        for i = 1, lite and 6 or 12 do
+            local b = freeSpot(20, 200) + Vector3.new(0, R:NextNumber(3, 9), 0)
+            local w = H.p(Vector3.new(0.7, 0.7, 0.7), CFrame.new(b), (i % 2 == 0) and Color3.fromRGB(120, 255, 220) or Color3.fromRGB(140, 255, 140), Enum.Material.Neon, nil, Enum.PartType.Ball)
+            local l = Instance.new("PointLight"); l.Color = w.Color; l.Range = 7; l.Brightness = 1.2; l.Parent = w
+            table.insert(H.wisps, {p = w, base = b, s = R:NextNumber(0.4, 0.9), ph = R:NextNumber() * 6.28})
+        end
+        -- morcegos voando em volta do castelo
+        for i = 1, lite and 7 or 14 do
+            local bl = Color3.fromRGB(15, 12, 18)
+            table.insert(H.bats, {
+                body = H.p(Vector3.new(0.6, 0.4, 0.9), CFrame.new(cc), bl),
+                wl = H.p(Vector3.new(1.4, 0.1, 0.8), CFrame.new(cc), bl),
+                wr = H.p(Vector3.new(1.4, 0.1, 0.8), CFrame.new(cc), bl),
+                c = (i % 3 == 0) and C or cc, r = R:NextNumber(25, 70), h = R:NextNumber(30, 70),
+                sp = R:NextNumber(0.4, 0.9) * (i % 2 == 0 and 1 or -1), ph = R:NextNumber() * 6.28,
+            })
+        end
+        -- ninhos
+        for _, pos in ipairs(nestPos) do
+            table.insert(H.nests, {pos = pos, ring = H.nest(pos)})
+        end
+        -- portal de saida
+        H.exitPos = C + Vector3.new(0, 0, 200)
+        local pc = C + Vector3.new(0, 8, 200)
+        H.makePortal(CFrame.lookAt(pc, C + Vector3.new(0, 8, 0)), H.world, "🚪 SAÍDA\nleve o ovo até aqui")
+        H.building = false
+        for _, n in ipairs(H.nests) do H.fillNest(n) end
+    end
+
+    -- ---------- ovos nos ninhos ----------
+    function H.roll()
+        local tot = 0
+        for _, p in ipairs(H.PETS) do tot = tot + (p.w or 0) end
+        local x = math.random() * tot
+        for _, p in ipairs(H.PETS) do
+            x = x - (p.w or 0)
+            if x <= 0 and (p.w or 0) > 0 then return p end
+        end
+        return H.PETS[1]
+    end
+    function H.fillNest(n, petName, mut)
+        if n.egg then pcall(function() n.egg:Destroy() end) end
+        local p = (petName and H.byName[petName]) or H.roll()
+        if not petName then mut = math.random() < 0.12 and "Spectral" or nil end
+        local egg = H.makeEgg(p.n, mut)
+        egg:PivotTo(CFrame.new(n.pos + Vector3.new(0, 1.85, 0)) * CFrame.Angles(0, math.random() * 6.28, 0))
+        egg.Parent = H.world
+        n.egg, n.pet, n.mut, n.respawn = egg, p.n, mut, nil
+        n.ring.Color = GK.COLORS[p.r] or Color3.fromRGB(150, 80, 255)
+        local bb = Instance.new("BillboardGui")
+        bb.Size = UDim2.fromOffset(170, 46); bb.StudsOffset = Vector3.new(0, 2.6, 0); bb.AlwaysOnTop = true; bb.MaxDistance = 70
+        bb.Adornee = egg.PrimaryPart; bb.Parent = egg
+        local t = Instance.new("TextLabel", bb)
+        t.Size = UDim2.fromScale(1, 1); t.BackgroundTransparency = 1; t.Font = Enum.Font.GothamBlack; t.TextScaled = true
+        t.TextStrokeTransparency = 0.3; t.RichText = true; t.TextColor3 = Color3.new(1, 1, 1)
+        local hex = (GK.COLORS[p.r] or Color3.new(1, 1, 1)):ToHex()
+        t.Text = "🎃 " .. p.n .. "\n<font color=\"#" .. hex .. "\">" .. p.r .. "</font>" .. (mut and "  <font color=\"#aaffee\">✦ Spectral</font>" or "")
+    end
+    function H.nearNest(r)
+        local I = H.inside; if not I then return end
+        for _, n in ipairs(H.nests) do
+            if n.egg and (Vector3.new(n.pos.X - I.pos.X, 0, n.pos.Z - I.pos.Z)).Magnitude < r then return n end
+        end
+    end
+
+    -- ---------- luz da noite (so na sua tela) ----------
+    function H.setLight(on)
+        local L = game:GetService("Lighting")
+        if on then
+            if not H.oldLight then
+                H.oldLight = {ClockTime = L.ClockTime, Brightness = L.Brightness, Ambient = L.Ambient, OutdoorAmbient = L.OutdoorAmbient,
+                    FogColor = L.FogColor, FogStart = L.FogStart, FogEnd = L.FogEnd, ExposureCompensation = L.ExposureCompensation}
+                local atm = L:FindFirstChildOfClass("Atmosphere")
+                if atm then H.oldAtm = {atm, atm.Density, atm.Color, atm.Decay, atm.Haze, atm.Glare} end
+            end
+            pcall(function()
+                L.ClockTime = 0; L.Brightness = 1.2; L.ExposureCompensation = 0
+                L.Ambient = Color3.fromRGB(70, 45, 80); L.OutdoorAmbient = Color3.fromRGB(80, 55, 95)
+                L.FogColor = Color3.fromRGB(35, 22, 45); L.FogStart = 40; L.FogEnd = 420
+                local a = H.oldAtm and H.oldAtm[1]
+                if a and a.Parent then a.Density = 0.42; a.Color = Color3.fromRGB(110, 70, 130); a.Decay = Color3.fromRGB(60, 25, 50); a.Haze = 2.2; a.Glare = 0 end
+            end)
+        elseif H.oldLight then
+            for k, v in pairs(H.oldLight) do pcall(function() L[k] = v end) end
+            local a = H.oldAtm
+            if a and a[1].Parent then pcall(function() a[1].Density, a[1].Color, a[1].Decay, a[1].Haze, a[1].Glare = a[2], a[3], a[4], a[5], a[6] end) end
+            H.oldLight, H.oldAtm = nil, nil
+        end
+    end
+
+    -- ---------- tela (HUD) ----------
+    function H.makeHud()
+        if H.hud then H.hud:Destroy() end
+        local sg = Instance.new("ScreenGui")
+        sg.Name = "NS22Assombrada"; sg.ResetOnSpawn = false; sg.DisplayOrder = 40
+        local okp = pcall(function() sg.Parent = (gethui and gethui()) or game:GetService("CoreGui") end)
+        if not okp or not sg.Parent then sg.Parent = LP:WaitForChild("PlayerGui") end
+        H.hud = sg
+        local function lbl(parent, size, pos, text, ts, color, anchor)
+            local l = Instance.new("TextLabel")
+            l.BackgroundTransparency = 1; l.Size = size; l.Position = pos; l.Text = text
+            l.Font = Enum.Font.GothamBlack; l.TextSize = ts; l.TextColor3 = color or Color3.new(1, 1, 1); l.TextStrokeTransparency = 0.4
+            if anchor then l.AnchorPoint = anchor end
+            l.Parent = parent
+            return l
+        end
+        local function btn(text, size, pos, anchor, col, cb)
+            local b = Instance.new("TextButton")
+            b.Size = size; b.Position = pos; b.AnchorPoint = anchor
+            b.BackgroundColor3 = col; b.BackgroundTransparency = 0.1; b.Text = text
+            b.Font = Enum.Font.GothamBlack; b.TextSize = 18; b.TextColor3 = Color3.new(1, 1, 1)
+            Instance.new("UICorner", b).CornerRadius = UDim.new(0, 12)
+            local st = Instance.new("UIStroke", b); st.Color = Color3.fromRGB(255, 150, 40); st.Thickness = 2
+            st.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+            b.Parent = sg
+            b.MouseButton1Click:Connect(cb)
+            return b
+        end
+        local u = {}
+        H.ui = u
+        u.title = lbl(sg, UDim2.fromOffset(500, 30), UDim2.new(0.5, 0, 0, 8), "🎃 DIMENSÃO ASSOMBRADA", 24, Color3.fromRGB(255, 150, 40), Vector2.new(0.5, 0))
+        u.msg = lbl(sg, UDim2.fromOffset(620, 24), UDim2.new(0.5, 0, 0, 40), "", 16, Color3.new(1, 1, 1), Vector2.new(0.5, 0))
+        u.msg.TextWrapped = true
+        u.info = lbl(sg, UDim2.fromOffset(420, 20), UDim2.new(0.5, 0, 0, 66), "", 13, Color3.fromRGB(210, 195, 230), Vector2.new(0.5, 0))
+        u.exit = btn("🚪 Sair", UDim2.fromOffset(110, 40), UDim2.new(1, -12, 0, 60), Vector2.new(1, 0), Color3.fromRGB(60, 25, 35), function() H.exit() end)
+        u.act = btn("", UDim2.fromOffset(230, 58), UDim2.new(0.5, 0, 1, -120), Vector2.new(0.5, 1), Color3.fromRGB(40, 20, 50), function()
+            if H.actionShown == "grab" then H.tryGrab() elseif H.actionShown == "atk" then H.attack() end
+        end)
+        u.act.Visible = false
+        local barBg = Instance.new("Frame")
+        barBg.AnchorPoint = Vector2.new(0.5, 1); barBg.Position = UDim2.new(0.5, 0, 1, -188); barBg.Size = UDim2.fromOffset(230, 12)
+        barBg.BackgroundColor3 = Color3.fromRGB(20, 15, 25); barBg.Visible = false; barBg.Parent = sg
+        Instance.new("UICorner", barBg).CornerRadius = UDim.new(0, 6)
+        local fill = Instance.new("Frame")
+        fill.Size = UDim2.fromScale(0, 1); fill.BackgroundColor3 = Color3.fromRGB(255, 150, 40); fill.Parent = barBg
+        Instance.new("UICorner", fill).CornerRadius = UDim.new(0, 6)
+        u.barBg, u.barFill = barBg, fill
+        local bossBg = Instance.new("Frame")
+        bossBg.AnchorPoint = Vector2.new(0.5, 0); bossBg.Position = UDim2.new(0.5, 0, 0, 94); bossBg.Size = UDim2.fromOffset(420, 24)
+        bossBg.BackgroundColor3 = Color3.fromRGB(25, 15, 30); bossBg.Visible = false; bossBg.Parent = sg
+        Instance.new("UICorner", bossBg).CornerRadius = UDim.new(0, 8)
+        local bf = Instance.new("Frame")
+        bf.Size = UDim2.fromScale(1, 1); bf.BackgroundColor3 = Color3.fromRGB(60, 255, 160); bf.Parent = bossBg
+        Instance.new("UICorner", bf).CornerRadius = UDim.new(0, 8)
+        u.bossBg, u.bossFill = bossBg, bf
+        u.bossTxt = lbl(bossBg, UDim2.fromScale(1, 1), UDim2.new(), "", 14)
+        u.bossTxt.ZIndex = 2
+    end
+    function H.msg(text, secs)
+        if not H.ui then return end
+        H.ui.msg.Text = text
+        H.msgUntil = tick() + (secs or 3)
+    end
+    function H.bar(k)
+        if not H.ui then return end
+        H.ui.barBg.Visible = k ~= nil
+        if k then H.ui.barFill.Size = UDim2.fromScale(math.clamp(k, 0, 1), 1) end
+    end
+    function H.updateHud()
+        local u = H.ui; if not u or not H.hud then return end
+        local act = H.action
+        if not act and H.boss then act = "atk" end
+        H.actionShown = act
+        u.act.Visible = act ~= nil
+        if act == "grab" then u.act.Text = H.grab and "🥚 Roubando..." or "🥚 Roubar  [E]"
+        elseif act == "atk" then u.act.Text = "⚔️ Atacar  [Q]" end
+        if H.msgUntil and tick() > H.msgUntil then u.msg.Text = ""; H.msgUntil = nil end
+        local b = H.boss
+        u.bossBg.Visible = b ~= nil
+        if b then
+            u.bossFill.Size = UDim2.fromScale(math.max(0, b.hp / b.max), 1)
+            u.bossTxt.Text = "👑 Cavaleiro Sem Cabeça   " .. math.max(0, math.floor(b.hp)) .. " / " .. b.max
+        end
+        local left = H.bossAt and math.max(0, H.bossAt - tick()) or 0
+        u.info.Text = (H.carry and ("🥚 Carregando: " .. H.carry.pet .. "   •   ") or "")
+            .. (b and "⚔️ O chefe está na área!" or string.format("👑 Cavaleiro em %d:%02d", math.floor(left / 60), math.floor(left % 60)))
+    end
+    function H.shake(t)
+        local I = H.inside; if not I then return end
+        local t0 = tick()
+        task.spawn(function()
+            while tick() - t0 < t and H.inside == I do
+                I.hum.CameraOffset = Vector3.new(math.random() - 0.5, math.random() - 0.5, math.random() - 0.5) * 1.6
+                task.wait(0.03)
+            end
+            pcall(function() I.hum.CameraOffset = Vector3.zero end)
+        end)
+    end
+    function H.greenArc(a, b)
+        local old = GK.BOLT_COLORS
+        GK.BOLT_COLORS = {Color3.fromRGB(90, 255, 130), Color3.fromRGB(60, 220, 255), Color3.fromRGB(170, 255, 200)}
+        pcall(GK.arc, a, b, 0.35)
+        GK.BOLT_COLORS = old
+    end
+
+    -- ---------- roubar / carregar / entregar ----------
+    function H.tryGrab()
+        if not H.inside or H.carry or H.grab then return end
+        local n = H.nearNest(9)
+        if not n then return end
+        H.grab = {nest = n, t0 = tick()}
+        H.wakeGuard()
+    end
+    function H.pickUp(n)
+        local I = H.inside; if not I or not n.egg then return end
+        local egg = n.egg
+        local bb = egg:FindFirstChildOfClass("BillboardGui"); if bb then bb:Destroy() end
+        H.carry = {egg = egg, nest = n, pet = n.pet, mut = n.mut, stopArms = holdArms(I.av)}
+        n.egg = nil
+        n.ring.Color = Color3.fromRGB(60, 50, 70)
+        n.respawn = tick() + 25
+        H.msg("🥚 Pegou " .. n.pet .. "! Corre pro portal de saída!", 3)
+    end
+    function H.loseCarry()
+        local c = H.carry; if not c then return end
+        H.carry = nil
+        if c.stopArms then pcall(c.stopArms) end
+        pcall(function() c.egg:Destroy() end)
+        if c.nest and not c.nest.egg then H.fillNest(c.nest, c.pet, c.mut) end
+    end
+    function H.deliver()
+        local c = H.carry; if not c then return end
+        H.carry = nil
+        if c.stopArms then pcall(c.stopArms) end
+        local ok = false
+        pcall(function() ok = GK.buyEgg(c.pet, c.egg) end)
+        if ok then
+            H.data.stolen = (H.data.stolen or 0) + 1
+            H.save()
+            H.msg("🎃 " .. c.pet .. (c.mut and " ✦Spectral" or "") .. " foi pra sua base! Vai chocar lá.", 4)
+            pcall(GK.sound, GK.SND_PLACE, H.exitPos, 1)
+        else
+            pcall(function() c.egg:Destroy() end)
+            if c.nest and not c.nest.egg then H.fillNest(c.nest, c.pet, c.mut) end
+            H.msg("❌ Base não encontrada ou cheia (aba Base → 📍 Minha base é aqui)", 5)
+        end
+        H.portalArmed = false
+        H.resetGuard(true)
+    end
+
+    -- ---------- guardiao: Ceifador (dorme no meio, acorda quando voce rouba) ----------
+    function H.spawnGuard()
+        if H.guard and H.guard.model.Parent then return end
+        local src = H.source("Ceifador"); if not src then return end
+        local m = src:Clone()
+        prep(m)
+        m.Name = "NS22Guardiao"; m.Parent = H.world
+        local ms = {model = m, k = 1}
+        pcall(function() ms.k = m:GetScale() end)
+        measure(ms)
+        rescale(ms, 2.6)
+        playAnim(m, "Ceifador", ms)
+        local g = {model = m, ms = ms, home = H.C + Vector3.new(0, 0, -6), state = "sleep", look = Vector3.new(0, 0, 1)}
+        g.pos = g.home
+        local bb = Instance.new("BillboardGui")
+        bb.Size = UDim2.fromOffset(170, 40); bb.AlwaysOnTop = true; bb.MaxDistance = 180
+        bb.StudsOffset = Vector3.new(0, ms.size.Y / 2 + 3, 0)
+        bb.Adornee = m:FindFirstChildWhichIsA("BasePart", true); bb.Parent = m
+        local t = Instance.new("TextLabel", bb)
+        t.Size = UDim2.fromScale(1, 1); t.BackgroundTransparency = 1; t.Font = Enum.Font.GothamBlack; t.TextScaled = true
+        t.TextStrokeTransparency = 0.3; t.TextColor3 = Color3.new(1, 1, 1); t.Text = "💤 Ceifador"
+        g.label = t
+        local hl = Instance.new("Highlight")
+        hl.FillTransparency = 1; hl.OutlineColor = Color3.fromRGB(255, 40, 40); hl.Enabled = false; hl.Adornee = m; hl.Parent = m
+        g.hl = hl
+        H.guard = g
+        H.resetGuard(false)
+    end
+    function H.placeGuard(bob)
+        local g = H.guard; if not g then return end
+        local c = Vector3.new(g.pos.X, H.C.Y + g.ms.size.Y / 2 + (bob or 0), g.pos.Z)
+        g.model:PivotTo(CFrame.new(c) * CFrame.lookAt(Vector3.zero, g.look) * g.ms.centerToPivot)
+    end
+    function H.wakeGuard()
+        local g = H.guard; if not g or g.state == "chase" then return end
+        g.state = "chase"
+        g.label.Text = "❗ Ceifador acordou!"; g.label.TextColor3 = Color3.fromRGB(255, 70, 70); g.hl.Enabled = true
+        if g.ms.trIdle then g.ms.trIdle:Stop(0.2) end
+        if g.ms.trWalk then g.ms.trWalk:Play(0.2); g.ms.trWalk:AdjustSpeed(1.6) end
+        H.msg("👻 O Ceifador acordou! Foge!", 2.5)
+    end
+    function H.resetGuard(walkHome)
+        local g = H.guard; if not g then return end
+        if not g.model.Parent then H.guard = nil return end
+        g.hl.Enabled = false
+        if walkHome then
+            g.state = "return"
+            g.label.Text = "😴 voltando..."; g.label.TextColor3 = Color3.fromRGB(200, 200, 220)
+        else
+            g.state = "sleep"; g.pos = g.home; g.look = Vector3.new(0, 0, 1)
+            g.label.Text = "💤 Ceifador"; g.label.TextColor3 = Color3.new(1, 1, 1)
+            if g.ms.trWalk then g.ms.trWalk:Stop(0.3) end
+            if g.ms.trIdle then g.ms.trIdle:Play(0.3); g.ms.trIdle:AdjustSpeed(0.4) end
+        end
+    end
+    function H.guardStep(dt)
+        local g, I = H.guard, H.inside
+        if not g or not I or not g.model.Parent then return end
+        if g.state == "chase" then
+            local to = Vector3.new(I.pos.X - g.pos.X, 0, I.pos.Z - g.pos.Z)
+            local d = to.Magnitude
+            if d > 0.5 then
+                g.look = to.Unit
+                g.pos = g.pos + to.Unit * math.min(d, (I.spd or 40) * 0.85 * dt)
+            end
+            if d < g.ms.size.X * 0.45 + 3 then
+                if H.carry then H.loseCarry(); H.msg("👻 O Ceifador te pegou! O ovo voltou pro ninho.", 3.5)
+                elseif H.grab then H.grab = nil; H.bar(nil) end
+                I.kb = (d > 0.1 and to.Unit or -I.look) * 90
+                H.shake(0.4)
+                H.resetGuard(true)
+            elseif not H.carry and not H.grab and d > 80 then
+                H.resetGuard(true)
+            end
+        elseif g.state == "return" then
+            local to = Vector3.new(g.home.X - g.pos.X, 0, g.home.Z - g.pos.Z)
+            local d = to.Magnitude
+            if d < 1 then H.resetGuard(false)
+            else g.look = to.Unit; g.pos = g.pos + to.Unit * math.min(d, 30 * dt) end
+        end
+        local bob = (g.state ~= "sleep" and not g.ms.trWalk) and math.abs(math.sin(tick() * 9)) * 0.8 or 0
+        H.placeGuard(bob)
+    end
+
+    -- ---------- chefe: Cavaleiro Sem Cabeca ----------
+    function H.spawnBoss()
+        local I = H.inside; if not I or H.boss then return end
+        local src = H.source("Cavaleiro Sem Cabeça"); if not src then return end
+        local m = src:Clone()
+        prep(m)
+        m.Name = "NS22Chefe"; m.Parent = H.world
+        local ms = {model = m, k = 1}
+        pcall(function() ms.k = m:GetScale() end)
+        measure(ms)
+        rescale(ms, 4.5)
+        playAnim(m, "Cavaleiro Sem Cabeça", ms)
+        if ms.trIdle then ms.trIdle:Stop(0) end
+        if ms.trWalk then ms.trWalk:Play(0.2) end
+        local b = {model = m, ms = ms, hp = 3000, max = 3000, pos = H.C + Vector3.new(0, 0, -150), look = Vector3.new(0, 0, 1), nextAtk = tick() + 4, phase = "walk"}
+        local hl = Instance.new("Highlight")
+        hl.FillColor = Color3.new(1, 1, 1); hl.FillTransparency = 1; hl.OutlineColor = Color3.fromRGB(60, 255, 200); hl.Adornee = m; hl.Parent = m
+        b.hl = hl
+        H.boss = b
+        shockwave(b.pos + Vector3.new(0, 0.5, 0))
+        for _ = 1, 6 do H.greenArc(b.pos + Vector3.new(0, 30, 0), b.pos + Vector3.new(math.random(-12, 12), 0.5, math.random(-12, 12))) end
+        H.msg("👑 O CAVALEIRO SEM CABEÇA apareceu! Ataque com Q / ⚔️", 4)
+        H.placeBoss(0)
+    end
+    function H.placeBoss(extraY)
+        local b = H.boss; if not b then return end
+        local c = Vector3.new(b.pos.X, H.C.Y + b.ms.size.Y / 2 + (extraY or 0), b.pos.Z)
+        b.model:PivotTo(CFrame.new(c) * CFrame.lookAt(Vector3.zero, b.look) * b.ms.centerToPivot)
+    end
+    function H.despawnBoss()
+        local b = H.boss
+        H.boss = nil
+        if b then
+            pcall(function() b.model:Destroy() end)
+            if b.mark then pcall(function() b.mark:Destroy() end) end
+        end
+    end
+    function H.bossStep(dt)
+        local b, I = H.boss, H.inside
+        if not b or not I or not b.model.Parent then return end
+        local to = Vector3.new(I.pos.X - b.pos.X, 0, I.pos.Z - b.pos.Z)
+        local d = to.Magnitude
+        if b.phase == "walk" then
+            if d > b.ms.size.X * 0.6 then
+                b.look = to.Unit
+                b.pos = b.pos + to.Unit * math.min(d, (I.spd or 40) * 0.45 * dt)
+            end
+            if tick() >= b.nextAtk then
+                b.t0 = tick()
+                if math.random() < 0.55 then
+                    b.phase = "aim"
+                    b.target = Vector3.new(I.pos.X, H.C.Y, I.pos.Z)
+                    b.mark = H.p(Vector3.new(0.2, 16, 16), CFrame.new(b.target + Vector3.new(0, 0.12, 0)) * CFrame.Angles(0, 0, math.rad(90)),
+                        Color3.fromRGB(255, 40, 40), Enum.Material.Neon, H.world, Enum.PartType.Cylinder)
+                    b.mark.Transparency = 0.4
+                else
+                    b.phase = "stomp"
+                end
+            end
+        elseif b.phase == "aim" then
+            local tl = Vector3.new(b.target.X - b.pos.X, 0, b.target.Z - b.pos.Z)
+            if tl.Magnitude > 0.1 then b.look = tl.Unit end
+            if tick() - b.t0 > 0.9 then b.phase = "dash"; b.from = b.pos; b.t0 = tick() end
+        elseif b.phase == "dash" then
+            local k = math.min(1, (tick() - b.t0) / 0.35)
+            b.pos = b.from:Lerp(Vector3.new(b.target.X, b.from.Y, b.target.Z), k)
+            if k >= 1 then
+                shockwave(b.target + Vector3.new(0, 0.5, 0))
+                if b.mark then b.mark:Destroy(); b.mark = nil end
+                local dd = Vector3.new(I.pos.X - b.target.X, 0, I.pos.Z - b.target.Z)
+                if dd.Magnitude < 10 then
+                    I.kb = (dd.Magnitude > 0.1 and dd.Unit or -I.look) * 110
+                    H.shake(0.5); H.msg("💥 Levou uma investida!", 1.5)
+                end
+                b.phase = "walk"; b.nextAtk = tick() + 3.5
+            end
+        elseif b.phase == "stomp" then
+            local k = (tick() - b.t0) / 0.9
+            H.placeBoss(math.sin(math.min(1, k) * math.pi) * 10)
+            if k >= 1 then
+                shockwave(b.pos + Vector3.new(0, 0.5, 0))
+                for _ = 1, 6 do H.greenArc(b.pos + Vector3.new(0, 1, 0), b.pos + Vector3.new(math.random(-30, 30), 0.5, math.random(-30, 30))) end
+                if d < 30 then
+                    I.kb = (d > 0.1 and to.Unit or -I.look) * 90
+                    H.shake(0.5); H.msg("💥 O chão tremeu!", 1.5)
+                end
+                b.phase = "walk"; b.nextAtk = tick() + 4
+            end
+            return
+        end
+        H.placeBoss(0)
+    end
+    function H.dmgPop(pos, n)
+        local a = Instance.new("Part")
+        a.Anchored = true; a.CanCollide = false; a.CanQuery = false; a.CanTouch = false; a.Transparency = 1
+        a.Size = Vector3.new(0.2, 0.2, 0.2); a.Position = pos; a.Parent = H.world
+        local bb = Instance.new("BillboardGui")
+        bb.Size = UDim2.fromOffset(90, 40); bb.AlwaysOnTop = true; bb.Adornee = a; bb.Parent = a
+        local t = Instance.new("TextLabel", bb)
+        t.Size = UDim2.fromScale(1, 1); t.BackgroundTransparency = 1; t.Font = Enum.Font.GothamBlack; t.TextScaled = true
+        t.TextColor3 = Color3.fromRGB(255, 220, 60); t.TextStrokeTransparency = 0.2; t.Text = "-" .. n
+        task.spawn(function()
+            for i = 1, 14 do
+                a.Position = a.Position + Vector3.new(0, 0.35, 0)
+                t.TextTransparency = i / 14; t.TextStrokeTransparency = 0.2 + i / 14 * 0.8
+                task.wait(0.04)
+            end
+            a:Destroy()
+        end)
+    end
+    function H.attack()
+        local b, I = H.boss, H.inside
+        if not b or not I then return end
+        if tick() - (H.lastAtk or 0) < 0.22 then return end
+        H.lastAtk = tick()
+        local c = (b.model:GetPivot() * b.ms.centerToPivot:Inverse()).Position
+        local d = (Vector3.new(c.X, 0, c.Z) - Vector3.new(I.pos.X, 0, I.pos.Z)).Magnitude
+        if d > b.ms.size.X * 0.5 + 30 then H.msg("Chegue mais perto do Cavaleiro!", 1) return end
+        local hand = I.av:FindFirstChild("RightHand") or I.av:FindFirstChild("Right Arm") or I.hrp
+        H.greenArc(hand.Position, c + Vector3.new(math.random(-3, 3), math.random(-2, 4), math.random(-3, 3)))
+        local dmg = math.random(45, 85)
+        b.hp = b.hp - dmg
+        H.dmgPop(c + Vector3.new(0, b.ms.size.Y * 0.4, 0), dmg)
+        b.hl.FillTransparency = 0.5
+        task.delay(0.08, function() pcall(function() b.hl.FillTransparency = 1 end) end)
+        if b.hp <= 0 then H.bossDefeated() end
+    end
+    function H.bossDefeated()
+        local b = H.boss; if not b then return end
+        H.boss = nil
+        if b.mark then pcall(function() b.mark:Destroy() end) end
+        local c = (b.model:GetPivot() * b.ms.centerToPivot:Inverse()).Position
+        for i = 1, 3 do task.delay(i * 0.12, function() shockwave(Vector3.new(c.X, H.C.Y + 0.5, c.Z)) end) end
+        for _ = 1, 10 do H.greenArc(c, c + Vector3.new(math.random(-25, 25), math.random(-5, 20), math.random(-25, 25))) end
+        task.spawn(function()
+            for i = 1, 10 do
+                for _, d in ipairs(b.model:GetDescendants()) do if d:IsA("BasePart") then d.LocalTransparencyModifier = i / 10 end end
+                task.wait(0.05)
+            end
+            b.model:Destroy()
+        end)
+        H.data.bosses = (H.data.bosses or 0) + 1
+        H.save()
+        local egg = H.makeEgg("Cavaleiro Sem Cabeça", math.random() < 0.25 and "Spectral" or nil)
+        local ok = false
+        pcall(function() ok = GK.buyEgg("Cavaleiro Sem Cabeça", egg) end)
+        if not ok then pcall(function() egg:Destroy() end) end
+        H.msg(ok and "🏆 Você derrotou o Cavaleiro Sem Cabeça! O ovo dele foi pra sua base!"
+            or "🏆 Cavaleiro derrotado! (base não encontrada: o ovo se perdeu)", 6)
+        H.bossAt = tick() + 240
+    end
+
+    -- ---------- cenario vivo (almas, morcegos, ninhos, luz) ----------
+    function H.ambient()
+        local t = tick()
+        for _, w in ipairs(H.wisps) do
+            w.p.Position = w.base + Vector3.new(math.sin(t * w.s + w.ph) * 4, math.sin(t * w.s * 1.7 + w.ph) * 1.5, math.cos(t * w.s + w.ph) * 4)
+        end
+        for _, b in ipairs(H.bats) do
+            local a = b.ph + t * b.sp
+            local pos = b.c + Vector3.new(math.cos(a) * b.r, b.h + math.sin(t * 2 + b.ph) * 3, math.sin(a) * b.r)
+            local tan = Vector3.new(-math.sin(a), 0, math.cos(a)) * (b.sp > 0 and 1 or -1)
+            local cf = CFrame.lookAt(pos, pos + tan)
+            local f = math.sin(t * 20 + b.ph) * 0.9
+            b.body.CFrame = cf
+            b.wl.CFrame = cf * CFrame.new(-0.3, 0, 0) * CFrame.Angles(0, 0, f) * CFrame.new(-0.7, 0, 0)
+            b.wr.CFrame = cf * CFrame.new(0.3, 0, 0) * CFrame.Angles(0, 0, -f) * CFrame.new(0.7, 0, 0)
+        end
+        if t - (H.lastLight or 0) > 0.5 then H.lastLight = t; H.setLight(true) end
+        for _, n in ipairs(H.nests) do
+            if not n.egg and n.respawn and t >= n.respawn and not (H.carry and H.carry.nest == n) then H.fillNest(n) end
+        end
+    end
+
+    -- ---------- entrar / sair / controlar a copia ----------
+    function H.enter()
+        if H.inside then return true end
+        if tripBusy then return false, "termine o roubo/corrida antes" end
+        if (sim.speed or 0) < H.req then
+            return false, "Precisa de " .. fmtMoney(H.req) .. " ⚡ (você tem " .. fmtMoney(sim.speed or 0) .. ")"
+        end
+        if GK.isMounted and GK.isMounted() then GK.dismount() end
+        if GK.stopRun then pcall(GK.stopRun) end
+        local ch = LP.Character
+        local rh = ch and ch:FindFirstChild("HumanoidRootPart")
+        local rhum = ch and ch:FindFirstChildOfClass("Humanoid")
+        if not rh or not rhum then return false, "sem personagem" end
+        if H.entering then return false, "carregando a área..." end
+        if not H.world then
+            H.entering = true
+            local ok, err = pcall(H.build)
+            H.building, H.entering = false, false
+            if not ok then
+                if H.world then pcall(function() H.world:Destroy() end) end
+                H.world, H.nests, H.wisps, H.bats = nil, {}, {}, {}
+                return false, "erro ao montar a área: " .. tostring(err)
+            end
+        end
+        H.world.Parent = folder
+        local av, hum, hrp = makeAvatar()
+        if not av then return false, "não deu pra copiar você" end
+        local I = {av = av, hum = hum, hrp = hrp, rh = rh, rhum = rhum, fov = Camera.FieldOfView,
+            pos = H.C + Vector3.new(0, 0, 178), look = Vector3.new(0, 0, -1), hopY = 0, hopV = 0, kb = Vector3.zero}
+        H.inside = I
+        tripBusy = true
+        rh.Anchored = true
+        task.spawn(function() while H.inside == I do setRealHidden(true) task.wait(0.4) end end)
+        Camera.CameraSubject = hum
+        H.setLight(true)
+        pcall(H.makeHud)
+        pcall(H.spawnGuard)
+        H.bossAt = tick() + 240
+        H.portalArmed = true
+        avPlay(hum, "idle")
+        local warned = false
+        I.conn = RunService.Heartbeat:Connect(function(dt)
+            local ok, e = pcall(H.step, dt)
+            if not ok and not warned then warned = true; warn("[Assombrada] " .. tostring(e)) end
+        end)
+        I.keys = game:GetService("UserInputService").InputBegan:Connect(function(io, gp)
+            if gp then return end
+            if io.KeyCode == Enum.KeyCode.E then H.tryGrab() elseif io.KeyCode == Enum.KeyCode.Q then H.attack() end
+        end)
+        H.msg("🎃 Bem-vindo! Roube um ovo-abóbora (E) e leve até o portal de saída.", 5)
+        return true
+    end
+    function H.exit()
+        local I = H.inside; if not I then return end
+        H.inside = nil
+        pcall(function() I.conn:Disconnect() end)
+        pcall(function() I.keys:Disconnect() end)
+        H.loseCarry()
+        H.grab = nil
+        H.despawnBoss()
+        if H.guard then pcall(function() H.guard.model:Destroy() end); H.guard = nil end
+        pcall(function() I.av:Destroy() end)
+        if H.hud then H.hud:Destroy(); H.hud = nil; H.ui = nil end
+        H.setLight(false)
+        setRealHidden(false)
+        if I.rh and I.rh.Parent then I.rh.Anchored = false end
+        local hum = LP.Character and LP.Character:FindFirstChildOfClass("Humanoid")
+        if hum then Camera.CameraSubject = hum end
+        Camera.FieldOfView = I.fov
+        if H.world then H.world.Parent = nil end
+        tripBusy = false
+        H.armed = false
+    end
+    function H.step(dt)
+        local I = H.inside; if not I then return end
+        if not alive() or not I.av.Parent or not I.rhum.Parent or not I.rh.Parent or I.rhum.Health <= 0 then H.exit() return end
+        local md = Vector3.new(I.rhum.MoveDirection.X, 0, I.rhum.MoveDirection.Z)
+        local mv = md.Magnitude > 0.1
+        local spd = I.rhum.WalkSpeed > 0 and I.rhum.WalkSpeed or 16
+        I.spd = spd
+        if mv then
+            I.pos = I.pos + md.Unit * spd * dt
+            I.look = I.look:Lerp(md.Unit, math.min(1, dt * 12))
+            I.look = I.look.Magnitude > 0.01 and I.look.Unit or md.Unit
+        end
+        if I.kb.Magnitude > 0.5 then
+            I.pos = I.pos + I.kb * dt
+            I.kb = I.kb * math.max(0, 1 - dt * 4)
+        else
+            I.kb = Vector3.zero
+        end
+        local off = Vector3.new(I.pos.X - H.C.X, 0, I.pos.Z - H.C.Z)
+        if off.Magnitude > H.R then I.pos = Vector3.new(H.C.X, I.pos.Y, H.C.Z) + off.Unit * H.R end
+        if I.rhum.Jump and I.hopY <= 0 then I.hopV = 30; I.rhum.Jump = false end
+        if I.hopY > 0 or I.hopV > 0 then
+            I.hopY = I.hopY + I.hopV * dt; I.hopV = I.hopV - 95 * dt
+            if I.hopY <= 0 then I.hopY, I.hopV = 0, 0 end
+        end
+        local hip = (I.hum.RigType == Enum.HumanoidRigType.R15) and (I.hum.HipHeight + I.hrp.Size.Y / 2) or 3
+        local p = Vector3.new(I.pos.X, H.C.Y + hip + I.hopY, I.pos.Z)
+        I.hrp.CFrame = CFrame.lookAt(p, p + I.look)
+        if mv ~= I.moving then I.moving = mv; avPlay(I.hum, mv and "run" or "idle") end
+        -- portal de saida: com ovo = entrega; sem ovo = sai da dimensao
+        local dp = Vector3.new(I.pos.X - H.exitPos.X, 0, I.pos.Z - H.exitPos.Z).Magnitude
+        if dp > 14 then H.portalArmed = true end
+        H.action = nil
+        if H.carry then
+            local c = handsPoint(I.av, I.hrp) + Vector3.new(0, 0.3, 0)
+            H.carry.egg:PivotTo(CFrame.lookAt(c, c + I.look))
+            if dp < 10 then H.deliver() end
+        else
+            if dp < 6 and H.portalArmed then H.exit() return end
+            local n = H.nearNest(9)
+            if n then H.action = "grab" end
+            if H.grab then
+                if n ~= H.grab.nest then
+                    H.grab = nil; H.bar(nil)
+                else
+                    local k = (tick() - H.grab.t0) / 1.2
+                    H.bar(k)
+                    if k >= 1 then H.grab = nil; H.bar(nil); H.pickUp(n) end
+                end
+            end
+        end
+        H.guardStep(dt)
+        H.bossStep(dt)
+        H.ambient()
+        if not H.boss and H.bossAt and tick() >= H.bossAt then H.spawnBoss() end
+        H.updateHud()
+    end
+
+    -- ---------- portal no mundo de verdade (depois da Enchanted Forest) ----------
+    function H.entryText() return "🎃 DIMENSÃO ASSOMBRADA\n⚡ precisa de " .. fmtMoney(H.req) .. " de velocidade" end
+    function H.buildEntry()
+        if H.entry and H.entry.Parent then return end
+        local mem = areaPosMem and areaPosMem["Enchanted Forest"]
+        local ef = (type(mem) == "table" and mem[3] and Vector3.new(mem[1], mem[2], mem[3])) or AREA_POS["Enchanted Forest"]
+        local rp = RaycastParams.new()
+        rp.FilterType = Enum.RaycastFilterType.Exclude
+        rp.FilterDescendantsInstances = {folder, LP.Character}
+        local base = ef + Vector3.new(140, 0, 0)
+        local hit = workspace:Raycast(base + Vector3.new(0, 80, 0), Vector3.new(0, -200, 0), rp)
+        if not hit then
+            base = ef + Vector3.new(60, 0, 0)
+            hit = workspace:Raycast(base + Vector3.new(0, 80, 0), Vector3.new(0, -200, 0), rp)
+        end
+        local y = hit and hit.Position.Y or ef.Y
+        local pos = Vector3.new(base.X, y + 8.5, base.Z)
+        H.entry, H.entryLabel = H.makePortal(CFrame.lookAt(pos, pos - Vector3.new(1, 0, 0)), folder, H.entryText())
+        H.p(Vector3.new(1, 18, 18), CFrame.new(Vector3.new(pos.X, y + 0.3, pos.Z)) * CFrame.Angles(0, 0, math.rad(90)),
+            Color3.fromRGB(40, 30, 50), Enum.Material.Slate, H.entry, Enum.PartType.Cylinder)
+        local beam = H.p(Vector3.new(220, 3, 3), CFrame.new(Vector3.new(pos.X, y + 110, pos.Z)) * CFrame.Angles(0, 0, math.rad(90)),
+            Color3.fromRGB(140, 60, 255), Enum.Material.Neon, H.entry, Enum.PartType.Cylinder)
+        beam.Transparency = 0.6
+        H.entryPos = pos
+    end
+    task.spawn(function()
+        task.wait(4)
+        pcall(H.buildEntry)
+        H.armed = true
+        while task.wait(0.25) do
+            if not alive() then
+                if H.inside then pcall(H.exit) end
+                break
+            end
+            local r = root()
+            if H.entryPos and r and not H.inside then
+                local d = (r.Position - H.entryPos).Magnitude
+                if d > 16 then
+                    H.armed = true
+                elseif d < 9 and H.armed then
+                    H.armed = false
+                    local ok, msg = H.enter()
+                    if not ok and H.entryLabel then
+                        H.entryLabel.Text = "🔒 " .. tostring(msg)
+                        task.delay(4, function() if H.entryLabel then H.entryLabel.Text = H.entryText() end end)
+                    end
+                end
+            end
+        end
+    end)
+    -- indice: conta os pets assombrados que nasceram na sua base
+    task.spawn(function()
+        while task.wait(2) do
+            if not alive() then break end
+            local changed = false
+            for _, sp in ipairs(spawned) do
+                if not sp.isEgg and not sp.hCounted and sp.petName and H.byName[sp.petName] then
+                    sp.hCounted = true
+                    H.data.disc[sp.petName] = (H.data.disc[sp.petName] or 0) + 1
+                    changed = true
+                end
+            end
+            if changed then H.save() end
+        end
+    end)
 end
 
 -- ===== SKINS (so na sua tela) =====
@@ -4087,10 +5189,10 @@ function GK.setTreadmill(name)
     end
     return false
 end
-function GK.buyEgg(cat)
+function GK.buyEgg(cat, model)
     if not myPlot() then simPopup("❌ Base não encontrada (aba Base → 📍)") return false end
     if #spawned >= MAX_ITEMS then simPopup("❌ Base cheia (" .. MAX_ITEMS .. ")") return false end
-    local c = GK.eggClone(cat)
+    local c = model or GK.eggClone(cat)
     if not c then return false end
     for _, p in ipairs(c:GetDescendants()) do
         if p:IsA("BasePart") and (p.Name == "Hitbox" or p.Name == "CustomBoundingBox") then p.Transparency = 1 end
@@ -4173,7 +5275,7 @@ end
 local function buildHub()
 local TS  = game:GetService("TweenService")
 local UIS = game:GetService("UserInputService")
-local VERSION = "v55"
+local VERSION = "v56"
 local pickResp
 
 if getgenv then
@@ -5273,6 +6375,78 @@ do
             if not alive() then break end
             wallet.Text = "💰 $" .. fmtMoney(sim.money)
             for _, f in ipairs(refreshers) do pcall(f) end
+        end
+    end)
+end
+
+-- =====================================================================
+-- ABA: ASSOMBRADA (area nova + indice dos pets novos)
+do
+    local H = GK.H
+    local pg = newPage("Assombrada", "🎃", 8)
+    section(pg, "🎃 Dimensão Assombrada")
+    local st = note(pg, "")
+    local enterBtn = button(pg, "🎃 Entrar na Dimensão Assombrada", "main", function()
+        if H.inside then H.exit() return end
+        local ok, msg = H.enter()
+        setStatus(ok and "🎃 Você entrou na Dimensão Assombrada!" or ("❌ " .. tostring(msg)))
+    end)
+    button(pg, "👑 Chamar o Cavaleiro Sem Cabeça agora", "card", function()
+        if not H.inside then setStatus("Entre na Dimensão Assombrada primeiro") return end
+        H.spawnBoss()
+    end)
+    local tip = note(pg, "Tem um PORTAL roxo no fim do mapa, depois da Enchanted Forest (ou use o botão acima). Lá dentro: E = roubar ovo-abóbora, Q = atacar o chefe (no celular, botão na tela). Leve o ovo até o portal de saída: ele vai pra sua base e choca um pet novo. Cuidado: o Ceifador acorda quando você rouba!")
+    tip.Size = UDim2.new(1, 0, 0, 58)
+    section(pg, "📖 Índice dos pets assombrados")
+    local cnt = note(pg, "")
+    local rows = {}
+    for i, p in ipairs(H.PETS) do
+        local card = Instance.new("Frame", pg)
+        card.Size = UDim2.new(1, 0, 0, 76); card.BackgroundColor3 = TH.card; card.LayoutOrder = nextOrder(pg)
+        corner(card, 12)
+        local th = Instance.new("Frame", card)
+        th.Position = UDim2.fromOffset(6, 6); th.Size = UDim2.fromOffset(64, 64); th.BackgroundColor3 = TH.card2
+        corner(th, 10)
+        local nm = label(card, "", 15, FT); nm.Position = UDim2.fromOffset(80, 8); nm.Size = UDim2.new(1, -90, 0, 20)
+        nm.TextXAlignment = Enum.TextXAlignment.Left
+        local rr = label(card, "", 13, FB); rr.Position = UDim2.fromOffset(80, 30); rr.Size = UDim2.new(1, -90, 0, 18)
+        rr.TextXAlignment = Enum.TextXAlignment.Left
+        local inc = label(card, "", 12, FN, TH.sub); inc.Position = UDim2.fromOffset(80, 50); inc.Size = UDim2.new(1, -90, 0, 18)
+        inc.TextXAlignment = Enum.TextXAlignment.Left
+        rows[i] = {p = p, th = th, nm = nm, rr = rr, inc = inc}
+    end
+    local function paint()
+        local got = 0
+        for _, r in ipairs(rows) do
+            local n = H.data.disc[r.p.n] or 0
+            local open = n > 0
+            if open then got = got + 1 end
+            if r.shown ~= open then
+                r.shown = open
+                for _, c in ipairs(r.th:GetChildren()) do if not c:IsA("UICorner") then c:Destroy() end end
+                local src = open and H.source(r.p.n)
+                if src then
+                    local vf = makeThumb(r.th, src); vf.Size = UDim2.fromScale(1, 1); vf.Position = UDim2.new()
+                else
+                    local q = label(r.th, "❓", 30, FT); q.Size = UDim2.fromScale(1, 1)
+                end
+            end
+            r.nm.Text = open and r.p.n or "???"
+            r.rr.Text = r.p.r .. (r.p.boss and "   •   👑 só do chefe" or "")
+            r.rr.TextColor3 = GK.COLORS[r.p.r] or TH.text
+            r.inc.Text = "💰 $" .. fmtMoney(r.p.i) .. "/s" .. (open and ("   •   chocados: " .. n) or "")
+        end
+        cnt.Text = string.format("Descobertos: %d de %d   •   ovos roubados: %d   •   chefes derrotados: %d",
+            got, #rows, H.data.stolen or 0, H.data.bosses or 0)
+        st.Text = string.format("⚡ Requisito: %s de velocidade   •   você tem %s %s", fmtMoney(H.req), fmtMoney(sim.speed or 0),
+            (sim.speed or 0) >= H.req and "✅" or "🔒")
+        enterBtn.Text = H.inside and "🚪 Sair da Dimensão Assombrada" or "🎃 Entrar na Dimensão Assombrada"
+    end
+    pcall(paint)
+    task.spawn(function()
+        while task.wait(1.5) do
+            if not alive() then break end
+            pcall(paint)
         end
     end)
 end
