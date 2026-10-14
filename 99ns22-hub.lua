@@ -1564,6 +1564,115 @@ local function eggModelFor(name)
     return f and f:FindFirstChild(name)
 end
 
+-- ===== efeitos dos ovos: copia brilho/particulas dos ovos de verdade do mapa (mesmo pet > mesma raridade);
+-- se nao achar nenhum, poe uma aura com a cor da raridade =====
+do
+    local FX = {ParticleEmitter = true, Beam = true, PointLight = true, SpotLight = true, SurfaceLight = true,
+        Sparkles = true, Fire = true, Smoke = true, Highlight = true}
+    local function fxList(m)
+        local out = {}
+        for _, d in ipairs(m:GetDescendants()) do if FX[d.ClassName] then table.insert(out, d) end end
+        return out
+    end
+    local function biggestPart(m)
+        local best, bv
+        for _, d in ipairs(m:GetDescendants()) do
+            if d:IsA("BasePart") and d.Name ~= "Hitbox" and d.Name ~= "CustomBoundingBox" then
+                local v = d.Size.X * d.Size.Y * d.Size.Z
+                if not bv or v > bv then best, bv = d, v end
+            end
+        end
+        return best
+    end
+    local function rarityOf(cat) local e = cat and GK.info[cat]; return e and e.rarity end
+    local function worldSource(cat)
+        local f = workspace:FindFirstChild("AreaEggSlotsClient"); if not f then return end
+        local rar, sameRar = rarityOf(cat), nil
+        for _, m in ipairs(f:GetChildren()) do
+            local info = m:IsA("Model") and eggCat[m.Name]
+            local c = info and info.cat
+            if c and (c == cat or (not sameRar and rar and rarityOf(c) == rar)) and #fxList(m) > 0 then
+                if c == cat then return m end
+                sameRar = m
+            end
+        end
+        return sameRar
+    end
+    local function graft(dst, src)
+        local root = biggestPart(dst)
+        if not root then return 0 end
+        local n, made = 0, {}
+        local function partIn(sp)
+            local dp = sp and dst:FindFirstChild(sp.Name, true)
+            if dp and dp:IsA("BasePart") then return dp end
+            return root
+        end
+        local function attFor(sa)
+            if made[sa] then return made[sa] end
+            local sp = sa.Parent
+            local dp = partIn(sp)
+            local a = dp:FindFirstChild(sa.Name)
+            if not (a and a:IsA("Attachment")) then
+                a = Instance.new("Attachment")
+                a.Name = sa.Name
+                local k = (sp and sp:IsA("BasePart") and sp.Size.Magnitude > 0) and (dp.Size.Magnitude / sp.Size.Magnitude) or 1
+                a.CFrame = (sa.CFrame - sa.CFrame.Position) + sa.CFrame.Position * k
+                a.Parent = dp
+            end
+            made[sa] = a
+            return a
+        end
+        for _, fx in ipairs(fxList(src)) do
+            local ok = pcall(function()
+                local par = fx.Parent
+                local c = fx:Clone()
+                if fx:IsA("Beam") then
+                    if not (fx.Attachment0 and fx.Attachment1) then c:Destroy() error("sem pontas") end
+                    c.Attachment0 = attFor(fx.Attachment0); c.Attachment1 = attFor(fx.Attachment1)
+                    c.Parent = c.Attachment0.Parent
+                elseif fx:IsA("Highlight") then c.Adornee = nil; c.Parent = dst
+                elseif par:IsA("Attachment") then c.Parent = attFor(par)
+                elseif par:IsA("BasePart") then c.Parent = partIn(par)
+                else c.Parent = root end
+            end)
+            if ok then n = n + 1 end
+        end
+        return n
+    end
+    local RANK = {Common = 1, Uncommon = 2, Rare = 3, Epic = 4, Legendary = 5, Mythic = 6, Cosmic = 7, Secret = 8, Eternal = 9, Divine = 10}
+    local function aura(dst, cat)
+        local root = biggestPart(dst); if not root then return end
+        local rar = rarityOf(cat) or "Common"
+        local lv = RANK[rar] or 1
+        local col = GK.COLORS[rar] or Color3.new(1, 1, 1)
+        local sz = math.clamp(root.Size.Magnitude * 0.08, 0.2, 1.5)
+        local pe = Instance.new("ParticleEmitter")
+        pe.Name = "NS22EggFx"
+        pe.Texture = "rbxasset://textures/particles/sparkles_main.dds"
+        pe.Color = ColorSequence.new(col); pe.LightEmission = 1
+        pe.Rate = GK.lite and 3 or (2 + lv * 1.5)
+        pe.Lifetime = NumberRange.new(0.8, 1.5); pe.Speed = NumberRange.new(0.4, 1.6); pe.SpreadAngle = Vector2.new(180, 180)
+        pe.Size = NumberSequence.new({NumberSequenceKeypoint.new(0, sz), NumberSequenceKeypoint.new(1, 0)})
+        pe.Transparency = NumberSequence.new(0.1, 1)
+        pe.Parent = root
+        if lv >= 5 then
+            local l = Instance.new("PointLight"); l.Name = "NS22EggLight"; l.Color = col
+            l.Brightness = 1 + lv * 0.2; l.Range = math.clamp(root.Size.Magnitude * 1.5, 6, 30); l.Parent = root
+        end
+    end
+    -- chamado logo depois de copiar o modelo do ovo (antes de mudar o tamanho)
+    function GK.eggFx(c, cat, srcEgg)
+        if not c or #fxList(c) > 0 then return end
+        local src = (srcEgg and srcEgg.Parent and #fxList(srcEgg) > 0 and srcEgg) or worldSource(cat)
+        local n = 0
+        if src then
+            local ok, k = pcall(graft, c, src)
+            n = ok and k or 0
+        end
+        if n == 0 then pcall(aura, c, cat) end
+    end
+end
+
 local petAreaCache   -- pet -> {area = true, ...} segundo as configs das areas
 local function buildPetAreas()
     petAreaCache = {}
@@ -2271,6 +2380,7 @@ local function simStealOne()
     if not e then if simPopup then simPopup("Sem ovos dessa area no mapa") end return end
     local wantCat = chosenPet or (e.info and e.info.cat)
     local c = cloneVisual(eggModelFor(wantCat) or e.m); if not c then return end
+    pcall(GK.eggFx, c, wantCat, (e.info and e.info.cat == wantCat) and e.m or nil)
     GK.hideStolen(e.m)
     for _, p in ipairs(c:GetDescendants()) do
         if p:IsA("BasePart") and (p.Name == "Hitbox" or p.Name == "CustomBoundingBox") then p.Transparency = 1 end
@@ -2831,6 +2941,8 @@ tripSteal = function(kind)
         local carry = cloneVisual(eggModelFor(cat) or egg or GK.fallbackEgg(petAreaName))
             or cloneVisual(GK.fallbackEgg())
         if not carry then error("sem modelo de ovo pra " .. tostring(cat)) end
+        local ei = egg and eggCat[egg.Name]
+        pcall(GK.eggFx, carry, cat, (ei and ei.cat == cat) and egg or nil)
         for _, p in ipairs(carry:GetDescendants()) do
             if p:IsA("BasePart") and (p.Name == "Hitbox" or p.Name == "CustomBoundingBox") then p.Transparency = 1 end
         end
@@ -3267,6 +3379,69 @@ do
         pcall(function() r.pet:Destroy() end)
         Camera.FieldOfView = r.fov
     end
+    -- botao de desmontar: copia o do PROPRIO jogo (se achar na tela dele); senao um igual ao aviso [F] Dismount
+    local function gameDismountButton(sg)
+        local pg = LP:FindFirstChild("PlayerGui")
+        local found, fromRide
+        if pg then
+            for _, d in ipairs(pg:GetDescendants()) do
+                if (d:IsA("TextLabel") or d:IsA("TextButton")) and d.Text:lower():find("dismount") then found = d break end
+            end
+            if not found then
+                for _, d in ipairs(pg:GetDescendants()) do
+                    if (d:IsA("TextLabel") or d:IsA("TextButton")) and d.Text:lower():gsub("%s", "") == "ride" then found, fromRide = d, true break end
+                end
+            end
+        end
+        if found then
+            local ok, btn = pcall(function()
+                local tgt = found
+                for _ = 1, 3 do
+                    if tgt:IsA("GuiButton") then break end
+                    if tgt.Parent and tgt.Parent:IsA("GuiObject") then tgt = tgt.Parent else break end
+                end
+                if not tgt:IsA("GuiButton") then tgt = found end
+                local abs = tgt.AbsoluteSize
+                local c = tgt:Clone()
+                for _, d in ipairs(c:GetDescendants()) do
+                    if d:IsA("LuaSourceContainer") then d:Destroy()
+                    elseif (d:IsA("TextLabel") or d:IsA("TextButton")) and fromRide and d.Text:lower():gsub("%s", "") == "ride" then d.Text = "Dismount" end
+                end
+                if c:IsA("TextLabel") or c:IsA("TextButton") then
+                    if fromRide then c.Text = "Dismount" end
+                end
+                c.AnchorPoint = Vector2.new(0.5, 1)
+                c.Position = UDim2.new(0.5, 0, 1, -110)
+                c.Size = (abs.X > 20 and abs.Y > 10) and UDim2.fromOffset(abs.X, abs.Y) or UDim2.fromOffset(190, 50)
+                c.Visible = true
+                c.Parent = sg
+                if c:IsA("GuiButton") then return c end
+                local hit = Instance.new("TextButton")
+                hit.BackgroundTransparency = 1; hit.Text = ""; hit.Size = UDim2.fromScale(1, 1); hit.ZIndex = 50; hit.Parent = c
+                return hit
+            end)
+            if ok and btn then return btn end
+        end
+        -- igual ao aviso do jogo: tecla [F] + "Dismount"
+        local box = Instance.new("TextButton")
+        box.AnchorPoint = Vector2.new(0.5, 1); box.Position = UDim2.new(0.5, 0, 1, -110); box.Size = UDim2.fromOffset(176, 52)
+        box.BackgroundColor3 = Color3.fromRGB(0, 0, 0); box.BackgroundTransparency = 0.45; box.Text = ""; box.AutoButtonColor = false
+        Instance.new("UICorner", box).CornerRadius = UDim.new(0, 10)
+        local key = Instance.new("TextLabel")
+        key.Position = UDim2.fromOffset(8, 8); key.Size = UDim2.fromOffset(36, 36)
+        key.BackgroundColor3 = Color3.fromRGB(25, 25, 25); key.BackgroundTransparency = 0.2
+        key.Font = Enum.Font.GothamBold; key.TextSize = 20; key.TextColor3 = Color3.new(1, 1, 1); key.Text = "F"
+        Instance.new("UICorner", key).CornerRadius = UDim.new(0, 8)
+        local ks = Instance.new("UIStroke", key); ks.Color = Color3.new(1, 1, 1); ks.Thickness = 2
+        key.Parent = box
+        local t = Instance.new("TextLabel")
+        t.Position = UDim2.fromOffset(54, 0); t.Size = UDim2.new(1, -60, 1, 0); t.BackgroundTransparency = 1
+        t.Font = Enum.Font.GothamBold; t.TextSize = 20; t.TextColor3 = Color3.new(1, 1, 1); t.TextXAlignment = Enum.TextXAlignment.Left
+        t.TextStrokeTransparency = 0.6; t.Text = "Dismount"
+        t.Parent = box
+        box.Parent = sg
+        return box
+    end
     function GK.mount(name)
         if ride or tripBusy then return false, "termine o que esta fazendo antes" end
         if GK.stopRun then GK.stopRun() end
@@ -3289,12 +3464,14 @@ do
         local animated = playAnim(pet, name, ms)
         local av, hum, hrp = makeAvatar()
         if not av then pet:Destroy() return false, "nao deu pra copiar voce" end
-        local rp = groundParams()
-        local g = workspace:Raycast(rh.Position, Vector3.new(0, -60, 0), rp)
-        local floor = g and g.Position.Y or (rh.Position.Y - 3)
-        local pos = Vector3.new(rh.Position.X, 0, rh.Position.Z)
-        local look = Vector3.new(rh.CFrame.LookVector.X, 0, rh.CFrame.LookVector.Z).Unit
-        rh.Anchored = true
+        -- o SEU personagem continua andando normal (escondido so pra voce, na velocidade dele);
+        -- o pet e a sua copia montada seguem ele. Desmontou = voce fica exatamente onde parou.
+        local function feetY()
+            local hh = (rhum.RigType == Enum.HumanoidRigType.R15) and (rhum.HipHeight + rh.Size.Y / 2) or 3
+            return rh.Position.Y - hh
+        end
+        local look = Vector3.new(rh.CFrame.LookVector.X, 0, rh.CFrame.LookVector.Z)
+        look = look.Magnitude > 0.01 and look.Unit or Vector3.new(0, 0, -1)
         local r = {av = av, pet = pet, fov = Camera.FieldOfView}
         ride = r
         task.spawn(function() while ride == r do setRealHidden(true) task.wait(0.4) end end)
@@ -3310,7 +3487,7 @@ do
         dust.Lifetime = NumberRange.new(0.5, 0.9); dust.Size = NumberSequence.new(1.2, 3); dust.Transparency = NumberSequence.new(0.5, 1)
         -- ONDE SENTAR: 1) ponto de montaria do proprio pet (se o jogo tiver) 2) costas do corpo principal.
         -- O ponto fica preso no corpo, entao voce acompanha o pet quando ele anda/pula/balanca.
-        pet:PivotTo(CFrame.new(Vector3.new(pos.X, floor + ms.size.Y / 2, pos.Z)) * CFrame.lookAt(Vector3.zero, look) * ms.centerToPivot)
+        pet:PivotTo(CFrame.new(Vector3.new(rh.Position.X, feetY() + ms.size.Y / 2, rh.Position.Z)) * CFrame.lookAt(Vector3.zero, look) * ms.centerToPivot)
         local hide = {HumanoidRootPart = true, CenterCFrame = true, CENTER = true, Hitbox = true, CustomBoundingBox = true, RootPart = true}
         local seatAtt, body, bodyVol
         for _, d in ipairs(pet:GetDescendants()) do
@@ -3354,23 +3531,17 @@ do
         local step = math.clamp(ms.size.Y * 0.04, 0.25, 3)
         -- altura do quadril sentado acima da sela
         local seat = (hum.RigType == Enum.HumanoidRigType.R15) and (hrp.Size.Y * 0.5 + 0.5) or 1.5
-        -- como no jogo: [F] Desmontar (e botao na tela pro celular)
+        -- tela: botao Dismount (igual ao do jogo) + setas de posicao (mostrar/esconder na aba Roubo do menu)
         pcall(function()
             local sg = Instance.new("ScreenGui")
             sg.Name = "NS22Mount"; sg.ResetOnSpawn = false; sg.DisplayOrder = 50
             local okp = pcall(function() sg.Parent = (gethui and gethui()) or game:GetService("CoreGui") end)
             if not okp or not sg.Parent then sg.Parent = LP:WaitForChild("PlayerGui") end
-            local b = Instance.new("TextButton")
-            b.AnchorPoint = Vector2.new(0.5, 1); b.Position = UDim2.new(0.5, 0, 1, -110); b.Size = UDim2.fromOffset(190, 44)
-            b.BackgroundColor3 = Color3.fromRGB(30, 30, 38); b.BackgroundTransparency = 0.15; b.AutoButtonColor = true
-            b.Font = Enum.Font.GothamBlack; b.TextSize = 18; b.TextColor3 = Color3.new(1, 1, 1); b.Text = "[F]  Desmontar"
-            Instance.new("UICorner", b).CornerRadius = UDim.new(0, 12)
-            local st = Instance.new("UIStroke", b); st.Color = Color3.fromRGB(120, 220, 120); st.Thickness = 2
-            b.Parent = sg
-            b.MouseButton1Click:Connect(function() GK.dismount() end)
-            -- setas: acerta onde voce senta (fica salvo pra esse pet)
+            r.gui = sg
+            local b = gameDismountButton(sg)
+            b.Activated:Connect(function() GK.dismount() end)
             local info = Instance.new("TextLabel")
-            info.AnchorPoint = Vector2.new(0.5, 1); info.Position = UDim2.new(0.5, 0, 1, -160); info.Size = UDim2.fromOffset(260, 20)
+            info.AnchorPoint = Vector2.new(0.5, 1); info.Position = UDim2.new(0.5, 0, 1, -170); info.Size = UDim2.fromOffset(260, 20)
             info.BackgroundTransparency = 1; info.Font = Enum.Font.GothamBold; info.TextSize = 13
             info.TextColor3 = Color3.new(1, 1, 1); info.TextStrokeTransparency = 0.4; info.Parent = sg
             local adjUi = {info}
@@ -3388,50 +3559,30 @@ do
                 a.MouseButton1Click:Connect(function() f(); showAdj(); GK.saveMountAdj() end)
                 table.insert(adjUi, a)
             end
-            arrow("▲", -172, -112, function() adj.u = adj.u + step end)
-            arrow("▼", -172, -66, function() adj.u = adj.u - step end)
-            arrow("◀", 172, -112, function() adj.b = adj.b - step end)   -- pra frente
-            arrow("▶", 172, -66, function() adj.b = adj.b + step end)    -- pra tras
-            -- 📐 mostra as setas / ✔ esconde quando ja ficou certinho (lembra pra proxima vez)
-            local tg = Instance.new("TextButton")
-            tg.AnchorPoint = Vector2.new(0.5, 1); tg.Position = UDim2.new(0.5, 122, 1, -110); tg.Size = UDim2.fromOffset(44, 44)
-            tg.BackgroundColor3 = Color3.fromRGB(30, 30, 38); tg.BackgroundTransparency = 0.15
-            tg.Font = Enum.Font.GothamBlack; tg.TextSize = 20; tg.TextColor3 = Color3.new(1, 1, 1)
-            Instance.new("UICorner", tg).CornerRadius = UDim.new(0, 12)
-            tg.Parent = sg
-            local function applyHide()
+            arrow("▲", -172, -116, function() adj.u = adj.u + step end)
+            arrow("▼", -172, -70, function() adj.u = adj.u - step end)
+            arrow("◀", 172, -116, function() adj.b = adj.b - step end)   -- pra frente
+            arrow("▶", 172, -70, function() adj.b = adj.b + step end)    -- pra tras
+            function GK.refreshMountUi()
                 local hidden = GK.mountAdj.__esconder == true
-                for _, o in ipairs(adjUi) do o.Visible = not hidden end
-                tg.Text = hidden and "📐" or "✔"
+                for _, o in ipairs(adjUi) do if o.Parent then o.Visible = not hidden end end
             end
-            tg.MouseButton1Click:Connect(function()
-                GK.mountAdj.__esconder = not (GK.mountAdj.__esconder == true)
-                applyHide(); GK.saveMountAdj()
-            end)
-            applyHide()
-            r.gui = sg
+            GK.refreshMountUi()
             r.keyConn = game:GetService("UserInputService").InputBegan:Connect(function(io, gp)
                 if not gp and io.KeyCode == Enum.KeyCode.F then GK.dismount() end
             end)
         end)
-        local hopY, hopV = 0, 0
         local moving, bobT = false, 0
         r.conn = RunService.Heartbeat:Connect(function(dt)
             if ride ~= r then return end
-            if not alive() or not av.Parent or not pet.Parent or not rhum.Parent then GK.dismount() return end
-            local spd = GK.mountSpeed > 0 and GK.mountSpeed or (rhum.WalkSpeed > 0 and rhum.WalkSpeed or 16)
-            local dir = Vector3.new(rhum.MoveDirection.X, 0, rhum.MoveDirection.Z)
-            local mv = dir.Magnitude > 0.1
+            if not alive() or not av.Parent or not pet.Parent or not rh.Parent or not rhum.Parent or rhum.Health <= 0 then GK.dismount() return end
+            local md = Vector3.new(rhum.MoveDirection.X, 0, rhum.MoveDirection.Z)
+            local mv = md.Magnitude > 0.1
             if mv then
-                dir = dir.Unit
-                pos = pos + dir * spd * dt
-                look = look:Lerp(dir, math.min(1, dt * 8))
-                if look.Magnitude < 0.01 then look = dir end
-                look = look.Unit
-                rp.FilterDescendantsInstances = {folder, LP.Character}
-                local hit = workspace:Raycast(Vector3.new(pos.X, floor + 30, pos.Z), Vector3.new(0, -200, 0), rp)
-                if hit then floor = hit.Position.Y end
+                look = look:Lerp(md.Unit, math.min(1, dt * 10))
+                look = look.Magnitude > 0.01 and look.Unit or md.Unit
             end
+            local spd = rhum.WalkSpeed > 0 and rhum.WalkSpeed or 16
             if mv ~= moving then
                 moving = mv
                 if ms.trWalk then
@@ -3443,18 +3594,12 @@ do
             -- pulinho de galope se o pet nao tiver animacao
             bobT = bobT + dt
             local bob = (not animated and mv) and math.abs(math.sin(bobT * 10)) * 0.8 or 0
-            -- pulo montado (espaco / botao de pular)
-            if rhum.Jump and hopY <= 0 then hopV = 28; rhum.Jump = false end
-            if hopY > 0 or hopV > 0 then
-                hopY = hopY + hopV * dt; hopV = hopV - 90 * dt
-                if hopY <= 0 then hopY, hopV = 0, 0 end
-            end
-            local center = Vector3.new(pos.X, floor + ms.size.Y / 2 + bob + hopY, pos.Z)
+            local p, fy = rh.Position, feetY()
             local rot = CFrame.lookAt(Vector3.zero, look)
-            pet:PivotTo(CFrame.new(center) * rot * ms.centerToPivot)
+            pet:PivotTo(CFrame.new(Vector3.new(p.X, fy + ms.size.Y / 2 + bob, p.Z)) * rot * ms.centerToPivot)
             local sp = seatPoint()
             hrp.CFrame = CFrame.new(sp + Vector3.new(0, seat + adj.u, 0) - look * adj.b) * rot
-            dustA.CFrame = CFrame.new(Vector3.new(pos.X, floor + 0.5, pos.Z))
+            dustA.CFrame = CFrame.new(Vector3.new(p.X, fy + 0.5, p.Z))
             local target = r.fov + (mv and math.clamp((spd - 60) / 20, 0, 20) or 0)
             Camera.FieldOfView = Camera.FieldOfView + (target - Camera.FieldOfView) * math.min(1, dt * 5)
         end)
@@ -3906,6 +4051,7 @@ function GK.buyEgg(cat)
     if #spawned >= MAX_ITEMS then simPopup("❌ Base cheia (" .. MAX_ITEMS .. ")") return false end
     local c = cloneVisual(eggModelFor(cat) or GK.fallbackEgg())
     if not c then return false end
+    pcall(GK.eggFx, c, cat)
     for _, p in ipairs(c:GetDescendants()) do
         if p:IsA("BasePart") and (p.Name == "Hitbox" or p.Name == "CustomBoundingBox") then p.Transparency = 1 end
     end
@@ -3987,7 +4133,7 @@ end
 local function buildHub()
 local TS  = game:GetService("TweenService")
 local UIS = game:GetService("UserInputService")
-local VERSION = "v52"
+local VERSION = "v53"
 local pickResp
 
 if getgenv then
@@ -4860,16 +5006,16 @@ do
             GK.dismount()
         end
     end)
-    cycle(pSteal, "🐎 Velocidade da montaria", function() return GK.mountSpeed > 0 and tostring(GK.mountSpeed) or "Igual a sua" end, function()
-        local opts = {0, 50, 90, 150, 300, 600}
-        local i = table.find(opts, GK.mountSpeed) or 0
-        GK.mountSpeed = opts[i % #opts + 1]
+    toggle(pSteal, "📐 Mostrar setas de posição (montado)", function() return GK.mountAdj.__esconder ~= true end, function(v)
+        GK.mountAdj.__esconder = not v
+        GK.saveMountAdj()
+        if GK.refreshMountUi then pcall(GK.refreshMountUi) end
     end)
     button(pSteal, "↺ Zerar posição na montaria (todos os pets)", "card", function()
-        GK.mountAdj = {}; GK.saveMountAdj()
+        GK.mountAdj = {__esconder = GK.mountAdj.__esconder}; GK.saveMountAdj()
         setStatus("Posição da montaria zerada")
     end)
-    note(pSteal, "Montado, use as setas ▲▼ (altura) e ◀▶ (frente/trás) na tela. Fica salvo pra cada pet.")
+    note(pSteal, "Montado: setas ▲▼ (altura) e ◀▶ (frente/trás) na tela, salvas pra cada pet. Depois de acertar, desligue as setas aqui. Você anda de verdade montado: desmontou, fica onde parou.")
     note(pSteal, "Escolha o pet na aba 🐾 Pets. Uma cópia sua monta nele; pros outros você está parado.")
     task.spawn(function()
         local last = GK.isMounted()
